@@ -6,6 +6,7 @@
 #   BUILD_DIR     构建目录（建议挂 named volume）   默认 /build/obs-studio
 #   OUTPUT_DIR    产物输出目录（bind mount 到宿主机 obs-binary/） 默认 /output
 #   EXTRA_CMAKE_FLAGS  追加给首次 cmake 配置的额外 -D 参数
+#   DEBIAN_PACKAGE_NAME CPack 包名（默认 obs-studio-baseline；编其他版本时覆盖）
 #   OUTPUT_UID / OUTPUT_GID  若设置，产物 chown 到该属主
 #
 # 行为：
@@ -17,6 +18,7 @@ set -e
 OBS_SRC_DIR=${OBS_SRC_DIR:-/src/obs-studio}
 BUILD_DIR=${BUILD_DIR:-/build/obs-studio}
 OUTPUT_DIR=${OUTPUT_DIR:-/output}
+DEBIAN_PACKAGE_NAME=${DEBIAN_PACKAGE_NAME:-obs-studio-baseline}
 NPROC=$(nproc)
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -44,7 +46,7 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
     -DENABLE_NEW_MPEGTS_OUTPUT=OFF \
     -DENABLE_RELOCATABLE=ON \
     -DOBS_DISABLED_PLUGINS='aja;aja-output-ui;decklink;decklink-captions;decklink-output-ui;linux-jack;linux-pipewire;nv-filters;mac-virtualcam;obs-libfdk;obs-nvenc;obs-qsv11;obs-text;obs-vst;obs-webrtc;oss-audio;sndio;vlc-video' \
-    -DCPACK_DEBIAN_PACKAGE_NAME=obs-studio-baseline \
+    -DCPACK_DEBIAN_PACKAGE_NAME=${DEBIAN_PACKAGE_NAME} \
     -DCPACK_DEBIAN_PACKAGE_DEPENDS='qt6.2-gles-local (>= 6.2.4-1~ans1), ffmpeg6.1-ans-local (>= 6.1.6-1~ans1), rockchip-mpp-local (>= 1.3.9-1~ans1)' \
     -DCPACK_DEBIAN_PACKAGE_CONFLICTS='obs-studio, libobs0, obs-studio-gles' \
     -DCPACK_DEBIAN_PACKAGE_REPLACES='obs-studio, libobs0, obs-studio-gles' \

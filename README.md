@@ -1,85 +1,80 @@
-# obs-buildenv — OBS 32.2.1 构建环境（Debian 11 arm64 / RK3588）
+# obs-buildenv — OBS 构建环境（Debian 11 arm64 / RK3588）
 
-本目录是独立的构建环境描述（脱离任何一份 OBS checkout 存在），计划与验收记录见
-`../docs/obs-build-environment-plan.md`。
+面向 RK3588（Debian 11 arm64）的 OBS 32.2.1 构建环境。上游依赖 Qt、FFmpeg、Rockchip MPP 已预编译成 deb 并发布，容器镜像负责编译 OBS 源码并产出 deb。
 
-## 组成
+镜像与依赖均为 **linux/arm64**；在 x86_64 主机上通过 QEMU 用户态模拟运行。
 
-| 文件 | 作用 |
-| --- | --- |
-| `Dockerfile` | multi-stage：base（依赖）→ qt6 / mpp / ffmpeg6（独立依赖编译+打 deb，统一 prefix `/usr/local/ans`）→ debs（导出）→ obs-builder（开发镜像） |
-| `docker-build.sh` | 全量构建：导出 deb 到 `./out/` 并生成镜像 `obs-builder:debian11-arm64`（仅里程碑验收时执行） |
-| `build-obs.sh` | 容器入口：`docker run` 时自动构建挂载进来的 OBS 源码 |
-| `vendor/rk3588/` | 设备 BSP 同版 librga deb（2.2.0-1，SHA-256 固定）；librockchip_mpp 由 Dockerfile mpp 阶段自编译并独立打 deb（设备 BSP mpp API 过旧，见计划 §2.2） |
-| `device-verify.sh` | 设备验收脚本（mpp F、M2/M3/M4 的 C/D/E 验收项 + 设备状态还原），随 deb 一起 scp 到目标设备执行 |
+## 获取依赖 deb（GitHub Release）
 
-## 一次性全量构建（里程碑验收）
+每次推送 `v*` tag 会触发 CI：构建镜像、导出三个依赖 deb 并自动发布到对应 tag 的 **Release**。
+
+到 [Releases](https://github.com/whoarei/obs-buildenv/releases) 下载附件：
+
+| 包 | 版本 | 作用 |
+| --- | --- | --- |
+| `qt6.2-gles-local` | 6.2.4 | Qt 6.2.4（qtbase + qtsvg，`-opengl es2`，无 desktop GL） |
+| `rockchip-mpp-local` | 1.3.9 | nyanmisaka/mpp jellyfin-mpp，硬编解码库 |
+| `ffmpeg6.1-ans-local` | 6.1.6 | ffmpeg-rockchip 6.1，rkmpp/rkrga 硬编解 |
+
+- 三个包统一安装到 `/usr/local/ans`，与系统 Qt5 / FFmpeg 4.3 共存。
+- `ffmpeg6.1-ans-local` 依赖 `rockchip-mpp-local` 与 `librga2`（librga 为设备 BSP 包，目标机通常已自带）。
+- 附件含各目录的 `SHA256SUMS`，下载后先校验：
+  ```sh
+  sha256sum -c qt6/SHA256SUMS mpp/SHA256SUMS ffmpeg/SHA256SUMS
+  ```
+
+## 获取镜像
+
+镜像发布在 GitHub Container Registry，tag 与 Release 对齐（`latest` 指向最新 tag）：
 
 ```sh
-./docker-build.sh
+docker pull --platform linux/arm64 ghcr.io/whoarei/obs-buildenv:latest
 ```
 
-产出（三个依赖 deb 统一装到 `/usr/local/ans`，与系统包共存）：
+### 在 x86_64 主机上运行
 
-- 镜像 `obs-builder:debian11-arm64`（依赖装齐；不含任何 OBS 源码）；
-- `out/mpp/rockchip-mpp-local_1.3.9-1~ans1_arm64.deb`（nyanmisaka/mpp jellyfin-mpp
-  commit `a9380ef3`，设备 BSP mpp API 过旧无法配对 ffmpeg-rockchip 6.1）；
-- `out/qt6/qt6.2-gles-local_6.2.4-1~ans1_arm64.deb`（Qt 6.2.4，`-opengl es2`）；
-- `out/ffmpeg/ffmpeg6.1-ans-local_6.1.6-1~ans1_arm64.deb`（nyanmisaka/ffmpeg-rockchip 6.1 分支，
-  rkmpp/rkrga 硬编解；Depends `rockchip-mpp-local` + `librga2`，mpp 不随包分发；
-  库带 `RUNPATH=/usr/local/ans/lib` 优先于设备系统旧 mpp）。
+arm64 镜像需要 QEMU 模拟（先注册 binfmt，需要 root）：
 
-### 验收方法
+```sh
+docker run --privileged --rm tonistiigi/binfmt --install arm64
+```
 
-1. **构建即验收**：Dockerfile 各阶段内嵌门槛，任一失败即构建失败——
-   mpp 阶段校验 `rockchip_mpp.pc` 版本与 `mpp_buffer_sync_partial_end` 符号；
-   qt6 阶段 `readelf` 审计 `libQt6Gui.so.6` 无 desktop `libGL`；
-   ffmpeg 阶段校验 `ffmpeg`/`ffprobe` 可执行、rkmpp 编解码器注册、
-   `ldd -r libavcodec.so.60` 无 `not found`。
-2. **产物核对**：`out/` 下三个 deb 各带 `SHA256SUMS`；
-   `sha256sum -c out/*/SHA256SUMS` 校验完整，
-   `dpkg-deb -I <deb>` 核对 control（Depends / Conflicts），
-   `dpkg-deb -c <deb>` 核对文件清单均在 `/usr/local/ans/` 下
-   （ffmpeg 包内不得含 `librockchip_mpp`）。
-3. **设备验收**（目标 172.16.0.154，详见计划 §6-§9）：把 `out/` 全部 deb 与
-   `device-verify.sh` scp 到设备后执行 `./device-verify.sh deps <deb目录>`
-   （mpp F0-F2、qt6 C0-C4、ffmpeg D0-D3）；再按下方「日常编译 OBS」产出
-   baseline deb 后执行 `./device-verify.sh obs <deb目录>`（E2/E3）；
-   验收完毕 `./device-verify.sh restore` 还原设备交付态。
+之后所有 `docker run` 都要带 `--platform linux/arm64`。注意：模拟执行性能约为原生的 1/10~1/20，且运行时硬解码（librockchip_mpp）无法走硬件，只能软件解码。
 
-## 日常编译 OBS（热循环）
+## 编译 OBS 源码
 
-在任意目录执行（以该目录为执行目录）：
+镜像入口 `build-obs.sh` 会自动编译挂载进来的 OBS checkout 并产出 deb，不需要提前装依赖：
 
 ```sh
 docker run --rm \
+  --platform linux/arm64 \
   -v /path/to/obs-studio:/src/obs-studio \
   -v $PWD/obs-binary:/output \
   -v builddir:/build \
-  -v ccache:/root/.ccache \
+  -v ccache:/root/.cache/ccache \
   -e OUTPUT_UID=$(id -u) -e OUTPUT_GID=$(id -g) \
-  obs-builder:debian11-arm64
+  ghcr.io/whoarei/obs-buildenv:latest
 ```
 
-容器入口自动完成：在 `/src/obs-studio` 找源码 → cmake 配置（仅首次）→
-ninja 编译（首次 `-k 0` 收集全部错误，之后增量 + ccache）→ CPack 出 deb →
-deb / ddeb / SHA-256 清单拷贝到 `/output`（即执行目录的 `obs-binary/`）。
+- 容器入口：找源码 → cmake 配置（仅首次）→ ninja 编译（首次 `-k 0` 收集全部错误，之后增量 + ccache）→ CPack 出 deb → 产物（deb / ddeb / `SHA256SUMS`）拷到 `/output`（即本机 `obs-binary/`）。
+- 任意一份 OBS checkout 均可直接编译，镜像不含 OBS 源码快照。
+- `builddir` 命名卷保存 CMake 构建树，加速增量编译；配置异常时 `docker volume rm builddir` 后重跑即全量重配。
+- `ccache` 命名卷缓存编译产物，建议保留以加速反复编译（删除也不影响正确性）。
+- 追加 cmake 参数：`-e EXTRA_CMAKE_FLAGS='-DXXX=ON'`（仅首次配置生效）。
+- 自定义产物包名：`-e DEBIAN_PACKAGE_NAME=obs-studio-<version>`（默认 `obs-studio-baseline`，编非基线版本时建议覆盖）。
+- 镜像内已设 `PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig` 与 `PATH=/usr/local/ans/bin:...`，OBS 的 FindFFmpeg 优先选中自编译 FFmpeg 6.1.6 而非系统 4.3。
 
-- 任意一份 OBS checkout 均可直接拿来编译；镜像不含 OBS 源码快照。
-- `builddir` named volume 保存 CMake 构建树（增量加速）；
-  构建目录不做 BuildKit cache mount，避免陈旧 CMakeCache 缓存失败的 feature test。
-  配置异常时手动清卷：`docker volume rm builddir` 后重跑即全量重配。
-- 追加 cmake 参数：`docker run ... -e EXTRA_CMAKE_FLAGS='-DXXX=ON' ...`（仅首次配置生效）。
-- 镜像内已设 `PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig` 与
-  `PATH=/usr/local/ans/bin:...`，OBS 的 FindFFmpeg 优先选中自编译
-  FFmpeg 6.1.6 而非系统 4.3。
+产物 `obs-studio-baseline` deb 安装到目标机时，与依赖 deb 一同安装（`dpkg -i qt6.2-gles-local*.deb rockchip-mpp-local*.deb ffmpeg6.1-ans-local*.deb obs-studio-baseline*.deb`）。
 
-## 基线构建配置（M4）
+## 基线构建配置
 
-默认按上游基线：桌面 OpenGL 渲染后端（不定义 `OBS_USE_GLES`）、`ENABLE_WAYLAND=OFF`
-（镜像无 wayland 依赖，上游默认 ON 会 configure 失败）、`ENABLE_SCRIPTING=OFF`、
-`ENABLE_NEW_MPEGTS_OUTPUT=OFF`、交付配置的黑名单插件与 CPack 元数据
-（包名 `obs-studio-baseline`，安装前缀 `/usr/local/ans`，
-Depends qt6.2-gles-local + ffmpeg6.1-ans-local + rockchip-mpp-local）。
-desktop GL 开发包（`libgl1-mesa-dev`/`libglvnd-dev`）只装在 obs-builder 最终阶段，
-qt6 阶段保持 GLES-only 洁净。
+默认按上游基线：桌面 OpenGL 渲染后端（不定义 `OBS_USE_GLES`）、`ENABLE_WAYLAND=OFF`（镜像无 wayland 依赖）、`ENABLE_SCRIPTING=OFF`、`ENABLE_NEW_MPEGTS_OUTPUT=OFF`，按交付配置黑名单部分插件，CPack 包名 `obs-studio-baseline`，安装前缀 `/usr/local/ans`，Depends 三个依赖 deb。desktop GL 开发包只装在最终镜像阶段，Qt 阶段保持 GLES-only 洁净。
+
+## 项目结构
+
+| 文件/目录 | 作用 |
+| --- | --- |
+| `Dockerfile` | 多阶段：base（依赖）→ qt6 / mpp / ffmpeg6（依赖编译 + 打 deb，统一 prefix `/usr/local/ans`）→ obs-builder（开发镜像） |
+| `build-obs.sh` | 容器入口，`docker run` 时自动编译挂载进来的 OBS 源码 |
+| `vendor/rk3588/` | 设备 BSP 同版 librga deb（SHA-256 固定，构建期依赖） |
+| `.github/workflows/docker-build.yml` | CI：tag 触发构建镜像并发布 deb 到 Release |
