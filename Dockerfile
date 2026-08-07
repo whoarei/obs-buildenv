@@ -14,7 +14,7 @@
 #   obs-builder 最终开发镜像（装齐三个 deb + 基线构建所需 desktop GL 开发包），
 #               入口 build-obs.sh 在 docker run 时构建挂载进来的 OBS 源码
 
-FROM arm64v8/debian:11 AS base
+FROM arm64v8/debian:11@sha256:9690447ddac1819c12c69aca67a003baa947887c504ba6308d19ab8067d148c7 AS base
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ninja-build pkg-config git curl ca-certificates xz-utils ccache \
@@ -67,7 +67,7 @@ RUN curl -fsSL -O \
     && echo "${QTBASE_SHA256}  qtbase-everywhere-src-${QT_VERSION}.tar.xz" | sha256sum -c - \
     && tar -xf qtbase-everywhere-src-${QT_VERSION}.tar.xz \
     && rm qtbase-everywhere-src-${QT_VERSION}.tar.xz
-RUN mkdir -p /build/qt/build-qtbase \
+RUN --mount=type=cache,target=/root/.cache/ccache mkdir -p /build/qt/build-qtbase \
     && cd /build/qt/build-qtbase \
     && ../qtbase-everywhere-src-${QT_VERSION}/configure \
         -prefix /usr/local/ans \
@@ -86,7 +86,7 @@ RUN curl -fsSL -O \
     && echo "${QTSVG_SHA256}  qtsvg-everywhere-src-${QT_VERSION}.tar.xz" | sha256sum -c - \
     && tar -xf qtsvg-everywhere-src-${QT_VERSION}.tar.xz \
     && rm qtsvg-everywhere-src-${QT_VERSION}.tar.xz
-RUN /usr/local/ans/bin/qt-cmake \
+RUN --mount=type=cache,target=/root/.cache/ccache /usr/local/ans/bin/qt-cmake \
         -S /build/qt/qtsvg-everywhere-src-${QT_VERSION} \
         -B /build/qt/build-qtsvg \
         -DCMAKE_BUILD_TYPE=Release \
@@ -136,7 +136,7 @@ RUN curl -fsSL -o mpp.tar.gz ${MPP_URL} \
     && echo "${MPP_SHA256}  mpp.tar.gz" | sha256sum -c - \
     && tar -xzf mpp.tar.gz \
     && rm mpp.tar.gz
-RUN cmake -S /build/mpp/${MPP_SRCDIR} -B /build/mpp/build \
+RUN --mount=type=cache,target=/root/.cache/ccache cmake -S /build/mpp/${MPP_SRCDIR} -B /build/mpp/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr/local/ans \
         -DCMAKE_INSTALL_LIBDIR=lib \
@@ -193,7 +193,7 @@ RUN curl -fsSL -o ffmpeg-rockchip.tar.gz ${FFMPEG_URL} \
     && echo "${FFMPEG_SHA256}  ffmpeg-rockchip.tar.gz" | sha256sum -c - \
     && tar -xzf ffmpeg-rockchip.tar.gz \
     && rm ffmpeg-rockchip.tar.gz
-RUN cd /build/ffmpeg/${FFMPEG_SRCDIR} \
+RUN --mount=type=cache,target=/root/.cache/ccache cd /build/ffmpeg/${FFMPEG_SRCDIR} \
     && ./configure \
         --prefix=/usr/local/ans \
         --enable-shared --disable-static \
