@@ -58,6 +58,7 @@ docker run --rm \
 
 - 容器入口：找源码 → cmake 配置（仅首次）→ ninja 编译（首次 `-k 0` 收集全部错误，之后增量 + ccache）→ CPack 出 deb → 产物（deb / ddeb / `SHA256SUMS`）拷到 `/output`（即本机 `obs-binary/`）。
 - 任意一份 OBS checkout 均可直接编译，镜像不含 OBS 源码快照。
+- OBS 程序、库、插件和运行数据保留在 `/usr/local/ans`；CPack 仅把 `.desktop`、图标和 metainfo 安装到标准 `/usr/share`，桌面入口使用绝对命令 `/usr/local/ans/bin/obs`。
 - `builddir` 命名卷保存 CMake 构建树，加速增量编译；配置异常时 `docker volume rm builddir` 后重跑即全量重配。
 - `ccache` 命名卷缓存编译产物，建议保留以加速反复编译（删除也不影响正确性）。
 - 追加 cmake 参数：`-e EXTRA_CMAKE_FLAGS='-DXXX=ON'`（仅首次配置生效）。
@@ -83,11 +84,16 @@ docker run --rm \
   ghcr.io/whoarei/obs-buildenv:latest
 ```
 
-生成的 deb control 字段为 `Package: obs-studio-gles`，并与 `obs-studio`、`libobs0`、`obs-studio-baseline` 冲突/替换，避免和 desktop OpenGL 版本混装。若使用尚未包含当前 `build-obs.sh` 的旧构建镜像，可额外挂载本地脚本：`-v $PWD/build-obs.sh:/usr/local/bin/build-obs.sh:ro`。
+生成的 deb control 字段为 `Package: obs-studio-gles`，并与 `obs-studio`、`libobs0`、`obs-studio-baseline` 冲突/替换，避免和 desktop OpenGL 版本混装。若使用尚未包含当前打包逻辑的旧构建镜像，需同时挂载本地入口和桌面集成脚本：
+
+```sh
+-v $PWD/build-obs.sh:/usr/local/bin/build-obs.sh:ro \
+-v $PWD/cmake/cpack-desktop-integration.cmake:/usr/local/share/obs-buildenv/cpack-desktop-integration.cmake:ro
+```
 
 ## 基线构建配置
 
-默认按上游基线：桌面 OpenGL 渲染后端（不定义 `OBS_USE_GLES`）、`ENABLE_WAYLAND=OFF`（镜像无 wayland 依赖）、`ENABLE_SCRIPTING=OFF`、`ENABLE_NEW_MPEGTS_OUTPUT=OFF`，按交付配置黑名单部分插件，CPack 包名 `obs-studio-baseline`，安装前缀 `/usr/local/ans`，Depends 三个依赖 deb。desktop GL 开发包只装在最终镜像阶段，Qt 阶段保持 GLES-only 洁净。
+默认按上游基线：桌面 OpenGL 渲染后端（不定义 `OBS_USE_GLES`）、`ENABLE_WAYLAND=OFF`（镜像无 wayland 依赖）、`ENABLE_SCRIPTING=OFF`、`ENABLE_NEW_MPEGTS_OUTPUT=OFF`，按交付配置黑名单部分插件，CPack 包名 `obs-studio-baseline`，运行时安装前缀 `/usr/local/ans`（桌面集成文件位于 `/usr/share`），Depends 三个依赖 deb。desktop GL 开发包只装在最终镜像阶段，Qt 阶段保持 GLES-only 洁净。
 
 ## 项目结构
 
@@ -95,5 +101,6 @@ docker run --rm \
 | --- | --- |
 | `Dockerfile` | 多阶段：base（依赖）→ qt6 / mpp / ffmpeg6（依赖编译 + 打 deb，统一 prefix `/usr/local/ans`）→ obs-builder（开发镜像） |
 | `build-obs.sh` | 容器入口，`docker run` 时自动编译挂载进来的 OBS 源码 |
+| `cmake/cpack-desktop-integration.cmake` | 在 CPack 暂存目录中将菜单、图标和 metainfo 移到标准 XDG 路径 |
 | `vendor/rk3588/` | 设备 BSP 同版 librga deb（SHA-256 固定，构建期依赖） |
 | `.github/workflows/docker-build.yml` | CI：tag 触发构建镜像并发布 deb 到 Release |

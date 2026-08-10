@@ -9,6 +9,8 @@
 #   DEBIAN_PACKAGE_NAME CPack 包名（默认 obs-studio-baseline；编其他版本时覆盖）
 #   DEBIAN_PACKAGE_CONFLICTS / DEBIAN_PACKAGE_REPLACES
 #       deb 冲突/替换关系；默认按包名避开“包与自身冲突”
+#   DESKTOP_INTEGRATION_SCRIPT
+#       CPack 桌面集成脚本；默认使用镜像内置路径
 #   OUTPUT_UID / OUTPUT_GID  若设置，产物 chown 到该属主
 #
 # 行为：
@@ -21,6 +23,7 @@ OBS_SRC_DIR=${OBS_SRC_DIR:-/src/obs-studio}
 BUILD_DIR=${BUILD_DIR:-/build/obs-studio}
 OUTPUT_DIR=${OUTPUT_DIR:-/output}
 DEBIAN_PACKAGE_NAME=${DEBIAN_PACKAGE_NAME:-obs-studio-baseline}
+DESKTOP_INTEGRATION_SCRIPT=${DESKTOP_INTEGRATION_SCRIPT:-/usr/local/share/obs-buildenv/cpack-desktop-integration.cmake}
 case "$DEBIAN_PACKAGE_NAME" in
   obs-studio-gles)
     DEFAULT_DEBIAN_PACKAGE_CONFLICTS='obs-studio, libobs0, obs-studio-baseline'
@@ -39,6 +42,8 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 [ -f "$OBS_SRC_DIR/CMakeLists.txt" ] \
   || die "OBS 源码未找到：$OBS_SRC_DIR（把 OBS checkout bind mount 到 /src/obs-studio，或用 OBS_SRC_DIR 覆盖）"
+[ -f "$DESKTOP_INTEGRATION_SCRIPT" ] \
+  || die "桌面集成脚本未找到：$DESKTOP_INTEGRATION_SCRIPT"
 
 # bind mount 源码属主与容器 root 不同，git describe（buildnumber/version）需要豁免
 git config --global --add safe.directory "$OBS_SRC_DIR" 2>/dev/null || true
@@ -65,6 +70,7 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
     -DCPACK_DEBIAN_PACKAGE_CONFLICTS="$DEBIAN_PACKAGE_CONFLICTS" \
     -DCPACK_DEBIAN_PACKAGE_REPLACES="$DEBIAN_PACKAGE_REPLACES" \
     -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS='/usr/local/ans/lib' \
+    -DCPACK_PRE_BUILD_SCRIPTS="$DESKTOP_INTEGRATION_SCRIPT" \
     ${EXTRA_CMAKE_FLAGS:-}
 else
   echo "== 增量重配置（沿用缓存参数） =="
@@ -74,6 +80,7 @@ else
     -DCPACK_DEBIAN_PACKAGE_CONFLICTS="$DEBIAN_PACKAGE_CONFLICTS" \
     -DCPACK_DEBIAN_PACKAGE_REPLACES="$DEBIAN_PACKAGE_REPLACES" \
     -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS='/usr/local/ans/lib' \
+    -DCPACK_PRE_BUILD_SCRIPTS="$DESKTOP_INTEGRATION_SCRIPT" \
     ${EXTRA_CMAKE_FLAGS:-}
 fi
 
