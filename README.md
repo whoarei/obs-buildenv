@@ -66,6 +66,25 @@ docker run --rm \
 
 产物 `obs-studio-baseline` deb 安装到目标机时，与依赖 deb 一同安装（`dpkg -i qt6.2-gles-local*.deb rockchip-mpp-local*.deb ffmpeg6.1-ans-local*.deb obs-studio-baseline*.deb`）。
 
+### 构建 OBS 32.2.1 GLES 分支
+
+GLES 移植分支使用独立 `libobs-gles` 图形模块；构建时必须关闭 desktop OpenGL，并关闭当前尚未支持的 Wayland 路径：
+
+```sh
+docker run --rm \
+  --platform linux/arm64 \
+  -v /path/to/obs-studio:/src/obs-studio:ro \
+  -v $PWD/obs-binary-gles:/output \
+  -v obs32-gles-build:/build \
+  -v ccache:/root/.cache/ccache \
+  -e EXTRA_CMAKE_FLAGS='-DENABLE_OPENGL=OFF -DENABLE_GLES=ON' \
+  -e DEBIAN_PACKAGE_NAME=obs-studio-gles \
+  -e OUTPUT_UID=$(id -u) -e OUTPUT_GID=$(id -g) \
+  ghcr.io/whoarei/obs-buildenv:latest
+```
+
+生成的 deb control 字段为 `Package: obs-studio-gles`，并与 `obs-studio`、`libobs0`、`obs-studio-baseline` 冲突/替换，避免和 desktop OpenGL 版本混装。若使用尚未包含当前 `build-obs.sh` 的旧构建镜像，可额外挂载本地脚本：`-v $PWD/build-obs.sh:/usr/local/bin/build-obs.sh:ro`。
+
 ## 基线构建配置
 
 默认按上游基线：桌面 OpenGL 渲染后端（不定义 `OBS_USE_GLES`）、`ENABLE_WAYLAND=OFF`（镜像无 wayland 依赖）、`ENABLE_SCRIPTING=OFF`、`ENABLE_NEW_MPEGTS_OUTPUT=OFF`，按交付配置黑名单部分插件，CPack 包名 `obs-studio-baseline`，安装前缀 `/usr/local/ans`，Depends 三个依赖 deb。desktop GL 开发包只装在最终镜像阶段，Qt 阶段保持 GLES-only 洁净。
