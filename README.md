@@ -61,6 +61,7 @@ docker run --rm \
 - OBS 程序、库、插件和运行数据保留在 `/usr/local/ans`；CPack 仅把 `.desktop`、图标和 metainfo 安装到标准 `/usr/share`，桌面入口使用绝对命令 `/usr/local/ans/bin/obs`。
 - `builddir` 命名卷保存 CMake 构建树，加速增量编译；配置异常时 `docker volume rm builddir` 后重跑即全量重配。
 - `ccache` 命名卷缓存编译产物，建议保留以加速反复编译（删除也不影响正确性）。
+- `build-obs.sh` 和 `cmake/` 下的 CPack 辅助脚本已内置到 `obs-builder` 镜像，正常构建无需额外挂载；文件更新后需要重新构建或发布镜像。
 - 追加 cmake 参数：`-e EXTRA_CMAKE_FLAGS='-DXXX=ON'`（仅首次配置生效）。
 - 自定义产物包名：`-e DEBIAN_PACKAGE_NAME=obs-studio-<version>`（默认 `obs-studio-baseline`，编非基线版本时建议覆盖）。
 - 镜像内已设 `PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig` 与 `PATH=/usr/local/ans/bin:...`，OBS 的 FindFFmpeg 优先选中自编译 FFmpeg 6.1.6 而非系统 4.3。
@@ -84,7 +85,7 @@ docker run --rm \
   ghcr.io/whoarei/obs-buildenv:latest
 ```
 
-生成的 deb control 字段为 `Package: obs-studio-gles`，并与 `obs-studio`、`libobs0`、`obs-studio-baseline` 冲突/替换，避免和 desktop OpenGL 版本混装。若使用尚未包含当前打包逻辑的旧构建镜像，需同时挂载本地入口和桌面集成脚本：
+生成的 deb control 字段为 `Package: obs-studio-gles`，并与 `obs-studio`、`libobs0`、`obs-studio-baseline` 冲突/替换，避免和 desktop OpenGL 版本混装。若临时使用尚未包含当前打包逻辑的旧构建镜像，才需要挂载本地入口和桌面集成脚本：
 
 ```sh
 -v $PWD/build-obs.sh:/usr/local/bin/build-obs.sh:ro \

@@ -264,7 +264,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH=/usr/local/ans/bin:$PATH
 ENV PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig
-COPY build-obs.sh /usr/local/bin/build-obs.sh
-COPY cmake/cpack-desktop-integration.cmake /usr/local/share/obs-buildenv/cpack-desktop-integration.cmake
-RUN chmod 0755 /usr/local/bin/build-obs.sh
+COPY --chmod=0755 build-obs.sh /usr/local/bin/build-obs.sh
+COPY cmake/ /usr/local/share/obs-buildenv/
 ENTRYPOINT ["/usr/local/bin/build-obs.sh"]

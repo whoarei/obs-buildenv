@@ -69,14 +69,14 @@ docker run --rm \
   -v "$PWD/obs-binary-gles:/output" \
   -v obs32-gles-build:/build \
   -v ccache:/root/.cache/ccache \
-  -v "$PWD/build-obs.sh:/usr/local/bin/build-obs.sh:ro" \
-  -v "$PWD/cmake/cpack-desktop-integration.cmake:/usr/local/share/obs-buildenv/cpack-desktop-integration.cmake:ro" \
   -e EXTRA_CMAKE_FLAGS='-DENABLE_OPENGL=OFF -DENABLE_GLES=ON' \
   -e DEBIAN_PACKAGE_NAME=obs-studio-gles \
   -e OUTPUT_UID=$(id -u) \
   -e OUTPUT_GID=$(id -g) \
   ghcr.io/whoarei/obs-buildenv:latest
 ```
+
+`obs-builder` 镜像已经内置仓库中的 `build-obs.sh` 和 `cmake/` 辅助脚本。更新这些文件后必须重新构建或发布镜像；只有使用旧镜像临时验证时，才按 README 的兼容方式额外挂载覆盖。
 
 根据当前提交选择无 `-modified` 后缀的正式包：
 
