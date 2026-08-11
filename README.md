@@ -91,6 +91,8 @@ docker run --rm \
 -v $PWD/cmake/cpack-desktop-integration.cmake:/usr/local/share/obs-buildenv/cpack-desktop-integration.cmake:ro
 ```
 
+构建后的设备安装、GLES/RKMPP 硬解、软件回退、循环播放和录制回归步骤见 [RK3588-GLES-RKMPP-TEST.md](RK3588-GLES-RKMPP-TEST.md)。
+
 ## 基线构建配置
 
 默认按上游基线：桌面 OpenGL 渲染后端（不定义 `OBS_USE_GLES`）、`ENABLE_WAYLAND=OFF`（镜像无 wayland 依赖）、`ENABLE_SCRIPTING=OFF`、`ENABLE_NEW_MPEGTS_OUTPUT=OFF`，按交付配置黑名单部分插件，CPack 包名 `obs-studio-baseline`，运行时安装前缀 `/usr/local/ans`（桌面集成文件位于 `/usr/share`），Depends 三个依赖 deb。desktop GL 开发包只装在最终镜像阶段，Qt 阶段保持 GLES-only 洁净。
