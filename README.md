@@ -71,6 +71,9 @@ docker run --rm \
 
 ### Mesa 25.0.7 源码上下文
 
+Mesa 构建环境、依赖选择、Meson 配置、libdrm 2.4.124 编译、deb 打包及问题修正
+记录见 [MESA25-BUILD-PACKAGING.md](MESA25-BUILD-PACKAGING.md)。
+
 Mesa 使用仓库外的源码树，不复制源码快照进本仓库。本地默认读取 `../mesa-25.0.7`，并要求其中 `VERSION` 严格为 `25.0.7`：
 
 ```sh

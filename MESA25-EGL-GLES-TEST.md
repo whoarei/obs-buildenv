@@ -3,6 +3,9 @@
 本文用于在 RK3588 Debian 11 设备上安装 `mesa25-rk3588-local`，并复核
 Mesa 25.0.7、EGL、OpenGL ES 和 panthor/Panfrost 硬件渲染是否正常。
 
+安装之前的源码、依赖、容器编译和 deb 打包过程见
+[MESA25-BUILD-PACKAGING.md](MESA25-BUILD-PACKAGING.md)。
+
 本文示例设备为 `172.16.0.205`。安装操作使用 `root`，所有图形测试必须以
 普通用户 `ans` 执行。命令中不包含密码。
 
