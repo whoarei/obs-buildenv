@@ -53,7 +53,12 @@ if(NOT _exec_match_count EQUAL 1)
   message(FATAL_ERROR "Expected exactly one 'Exec=obs' entry, found ${_exec_match_count}")
 endif()
 
-string(REPLACE "Exec=obs" "Exec=/usr/local/ans/bin/obs" _desktop_contents "${_desktop_contents}")
+string(REPLACE
+  "Exec=obs"
+  "Exec=/usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs"
+  _desktop_contents
+  "${_desktop_contents}"
+)
 file(WRITE "${_desktop_file}" "${_desktop_contents}")
 
-message(STATUS "Installed OBS desktop integration in /usr/share with an absolute launcher path")
+message(STATUS "Installed OBS desktop integration in /usr/share with the Mesa 25 launcher")

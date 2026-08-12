@@ -5,6 +5,10 @@ set -e
 export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/local/ans/share/glvnd/egl_vendor.d/50_mesa.json
 export LIBGL_DRIVERS_PATH=/usr/local/ans/lib/dri
 export GBM_BACKENDS_PATH=/usr/local/ans/lib/gbm
-export LD_LIBRARY_PATH=/usr/local/ans/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+# Some RK3588 BSP images put their proprietary Mali libEGL/libGLES ahead of
+# Debian's GLVND dispatcher in ld.so.cache.  Keep the private Mesa libraries
+# first, then select the distro GLVND client libraries explicitly.
+GLVND_LIBDIR=/usr/lib/aarch64-linux-gnu
+export LD_LIBRARY_PATH=/usr/local/ans/lib:${GLVND_LIBDIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
 exec "$@"

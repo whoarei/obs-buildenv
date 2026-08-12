@@ -86,6 +86,16 @@ git -C ../mesa worktree add --detach ../mesa-25.0.7 mesa-25.0.7
 /usr/local/ans/bin/mesa25-run /usr/local/ans/bin/mesa-egl-gles-smoke
 ```
 
+`mesa25-run` 除了固定 Mesa vendor、DRI、GBM 路径，还会显式选择 Debian
+GLVND dispatcher。部分 RK3588 BSP 会让厂商 Mali `libEGL.so.1` 在
+`ld.so.cache` 中排到 GLVND 前面，直接启动程序会绕过 Mesa vendor；需要使用
+Mesa 25 的 EGL/GLES 程序统一通过该入口启动。OBS deb 的桌面文件已自动使用
+`mesa25-run`，命令行启动可执行：
+
+```sh
+/usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs
+```
+
 ### 构建 OBS 32.2.1 GLES 分支
 
 GLES 移植分支使用独立 `libobs-gles` 图形模块；构建时必须关闭 desktop OpenGL，并关闭当前尚未支持的 Wayland 路径：

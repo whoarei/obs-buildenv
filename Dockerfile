@@ -142,7 +142,7 @@ RUN mkdir -p /work/mesa-pkg/usr/local /work/mesa-pkg/DEBIAN \
     && cp -a /usr/local/ans /work/mesa-pkg/usr/local/ \
     && printf '%s\n' \
         'Package: mesa25-rk3588-local' \
-        'Version: 25.0.7-1~ans1' \
+        'Version: 25.0.7-2~ans1' \
         'Section: libs' \
         'Priority: optional' \
         'Architecture: arm64' \
@@ -165,7 +165,7 @@ RUN mkdir -p /work/mesa-pkg/usr/local /work/mesa-pkg/DEBIAN \
     && cp /work/mesa-pkg/DEBIAN/postinst /work/mesa-pkg/DEBIAN/postrm \
     && chmod 0755 /work/mesa-pkg/DEBIAN/postinst /work/mesa-pkg/DEBIAN/postrm \
     && dpkg-deb --build --root-owner-group /work/mesa-pkg \
-        /out/mesa/mesa25-rk3588-local_25.0.7-1~ans1_arm64.deb \
+        /out/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb \
     && ( cd /out/mesa && sha256sum *.deb > SHA256SUMS )
 
 FROM base AS qt6
@@ -369,7 +369,7 @@ RUN cd /tmp/vendor-rk3588 \
     && dpkg -i \
         librga2_2.2.0-1_arm64.deb \
         librga-dev_2.2.0-1_arm64.deb \
-        /tmp/debs/mesa/mesa25-rk3588-local_25.0.7-1~ans1_arm64.deb \
+        /tmp/debs/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb \
         /tmp/debs/mpp/rockchip-mpp-local_1.3.9-1~ans1_arm64.deb \
         /tmp/debs/qt6/qt6.2-gles-local_6.2.4-1~ans1_arm64.deb \
         /tmp/debs/ffmpeg/ffmpeg6.1-ans-local_6.1.6-1~ans1_arm64.deb \
