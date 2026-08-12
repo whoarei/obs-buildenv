@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run one command against the Mesa 25.0.7 stack installed under /usr/local/ans.
+set -e
+
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/local/ans/share/glvnd/egl_vendor.d/50_mesa.json
+export LIBGL_DRIVERS_PATH=/usr/local/ans/lib/dri
+export GBM_BACKENDS_PATH=/usr/local/ans/lib/gbm
+export LD_LIBRARY_PATH=/usr/local/ans/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+
+exec "$@"

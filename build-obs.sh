@@ -66,7 +66,7 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
     -DENABLE_RELOCATABLE=ON \
     -DOBS_DISABLED_PLUGINS='aja;aja-output-ui;decklink;decklink-captions;decklink-output-ui;linux-jack;linux-pipewire;nv-filters;mac-virtualcam;obs-libfdk;obs-nvenc;obs-qsv11;obs-text;obs-vst;obs-webrtc;oss-audio;sndio;vlc-video' \
     -DCPACK_DEBIAN_PACKAGE_NAME=${DEBIAN_PACKAGE_NAME} \
-    -DCPACK_DEBIAN_PACKAGE_DEPENDS='qt6.2-gles-local (>= 6.2.4-1~ans1), ffmpeg6.1-ans-local (>= 6.1.6-1~ans1), rockchip-mpp-local (>= 1.3.9-1~ans1)' \
+    -DCPACK_DEBIAN_PACKAGE_DEPENDS='mesa25-rk3588-local (>= 25.0.7-1~ans1), qt6.2-gles-local (>= 6.2.4-1~ans1), ffmpeg6.1-ans-local (>= 6.1.6-1~ans1), rockchip-mpp-local (>= 1.3.9-1~ans1)' \
     -DCPACK_DEBIAN_PACKAGE_CONFLICTS="$DEBIAN_PACKAGE_CONFLICTS" \
     -DCPACK_DEBIAN_PACKAGE_REPLACES="$DEBIAN_PACKAGE_REPLACES" \
     -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS='/usr/local/ans/lib' \
@@ -76,7 +76,7 @@ else
   echo "== 增量重配置（沿用缓存参数） =="
   cmake -S "$OBS_SRC_DIR" -B "$BUILD_DIR" \
     -DCPACK_DEBIAN_PACKAGE_NAME="$DEBIAN_PACKAGE_NAME" \
-    -DCPACK_DEBIAN_PACKAGE_DEPENDS='qt6.2-gles-local (>= 6.2.4-1~ans1), ffmpeg6.1-ans-local (>= 6.1.6-1~ans1), rockchip-mpp-local (>= 1.3.9-1~ans1)' \
+    -DCPACK_DEBIAN_PACKAGE_DEPENDS='mesa25-rk3588-local (>= 25.0.7-1~ans1), qt6.2-gles-local (>= 6.2.4-1~ans1), ffmpeg6.1-ans-local (>= 6.1.6-1~ans1), rockchip-mpp-local (>= 1.3.9-1~ans1)' \
     -DCPACK_DEBIAN_PACKAGE_CONFLICTS="$DEBIAN_PACKAGE_CONFLICTS" \
     -DCPACK_DEBIAN_PACKAGE_REPLACES="$DEBIAN_PACKAGE_REPLACES" \
     -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS='/usr/local/ans/lib' \
