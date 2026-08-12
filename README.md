@@ -86,6 +86,9 @@ git -C ../mesa worktree add --detach ../mesa-25.0.7 mesa-25.0.7
 /usr/local/ans/bin/mesa25-run /usr/local/ans/bin/mesa-egl-gles-smoke
 ```
 
+完整的安装、测试、动态库加载链复核和结果文件采集步骤见
+[MESA25-EGL-GLES-TEST.md](MESA25-EGL-GLES-TEST.md)。
+
 `mesa25-run` 除了固定 Mesa vendor、DRI、GBM 路径，还会显式选择 Debian
 GLVND dispatcher。部分 RK3588 BSP 会让厂商 Mali `libEGL.so.1` 在
 `ld.so.cache` 中排到 GLVND 前面，直接启动程序会绕过 Mesa vendor；需要使用
