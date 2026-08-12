@@ -118,7 +118,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         -Dgallium-opencl=disabled '-Dvideo-codecs=' \
         -Dbuild-tests=false '-Dtools=' -Dosmesa=false \
         -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
-        -Dzstd=disabled -Dxmlconfig=enabled -Dprecomp-compiler=disabled \
+        -Dzstd=disabled -Dxmlconfig=enabled \
     && meson compile -C build-mesa -j "$(nproc)" \
     && meson install -C build-mesa
 COPY mesa-egl-gles-smoke.c /tmp/mesa-egl-gles-smoke.c
