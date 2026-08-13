@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+MALI_CONF=/etc/ld.so.conf.d/00-aarch64-mali.conf
+MALI_DIVERT=/etc/ld.so.conf.d/00-aarch64-mali.conf.disabled-by-mesa25-local
+case "$1" in
+    remove|purge)
+        divert_package=$(dpkg-divert --listpackage "$MALI_CONF" 2>/dev/null || true)
+        if [ "$divert_package" = mesa25-local ]; then
+            dpkg-divert --package mesa25-local --remove --rename \
+                --divert "$MALI_DIVERT" "$MALI_CONF"
+        fi
+        ;;
+esac
+
+ldconfig 2>/dev/null || true
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+exit 0

@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+# LightDM constructs a sanitized environment for the X server, so systemd
+# service Environment= values do not reliably reach Xorg. Set the Mesa loader
+# paths in the process that directly execs Xorg.
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/local/ans/share/glvnd/egl_vendor.d/50_mesa.json
+export __GLX_VENDOR_LIBRARY_NAME=mesa
+export LIBGL_DRIVERS_PATH=/usr/local/ans/lib/dri:/usr/lib/aarch64-linux-gnu/dri
+export GBM_BACKENDS_PATH=/usr/local/ans/lib/gbm
+
+exec /usr/bin/X \
+    -config /usr/local/ans/share/obs-buildenv/mesa25-xorg.conf \
+    -configdir /usr/local/ans/share/obs-buildenv/xorg.conf.d \
+    "$@"

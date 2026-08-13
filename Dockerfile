@@ -9,7 +9,7 @@
 #   mesa-build-base 从 base 派生并补 Meson 1.7.2 与 Mesa 专用构建依赖；
 #               不使稳定的 Qt / MPP / FFmpeg 缓存失效
 #   mesa25      从 mesa_source named context 编译 Mesa 25.0.7 + libdrm 2.4.124，
-#               生成 mesa25-rk3588-local deb（panfrost / EGL / GLES / GBM）
+#               生成 mesa25-local deb（panfrost / EGL / GLES / GBM）
 #   qt6         Qt 6.2.4（-opengl es2）编译 + qt6.2-gles-local deb 打包
 #   mpp         nyanmisaka/mpp jellyfin-mpp（.pc 1.3.9）编译 + rockchip-mpp-local deb 打包
 #   ffmpeg6     nyanmisaka/ffmpeg-rockchip（6.1 分支）编译 + ffmpeg6.1-ans-local deb 打包
@@ -109,7 +109,7 @@ ENV PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgc
 RUN --mount=type=cache,target=/root/.cache/ccache \
     CC='ccache gcc' CXX='ccache g++' meson setup build-mesa src \
         --prefix=/usr/local/ans --libdir=lib --buildtype=release \
-        -Dplatforms=x11 -Dgallium-drivers=panfrost '-Dvulkan-drivers=' \
+        -Dplatforms=x11 -Dgallium-drivers=panfrost,softpipe '-Dvulkan-drivers=' \
         -Degl=enabled -Dgbm=enabled -Dgles1=disabled -Dgles2=enabled \
         -Dopengl=true -Dglx=dri -Dglvnd=enabled -Dshared-glapi=enabled \
         -Dllvm=disabled -Dshared-llvm=disabled \
@@ -122,14 +122,22 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && meson compile -C build-mesa -j "$(nproc)" \
     && meson install -C build-mesa
 COPY mesa-egl-gles-smoke.c /tmp/mesa-egl-gles-smoke.c
+COPY mesa-glamor-shader-smoke.c /tmp/mesa-glamor-shader-smoke.c
 COPY mesa25-run /usr/local/ans/bin/mesa25-run
+COPY --chmod=0755 packaging/mesa25-local/mesa25-xorg \
+    /usr/local/ans/bin/mesa25-xorg
+COPY packaging/mesa25-local/01-xorg-glamor.conf \
+    /usr/local/ans/share/drirc.d/01-xorg-glamor.conf
 RUN cc -O2 -Wall -Wextra -o /usr/local/ans/bin/mesa-egl-gles-smoke \
         /tmp/mesa-egl-gles-smoke.c -lEGL -lGLESv2 \
-    && rm /tmp/mesa-egl-gles-smoke.c \
+    && cc -O2 -Wall -Wextra -o /usr/local/ans/bin/mesa-glamor-shader-smoke \
+        /tmp/mesa-glamor-shader-smoke.c -lEGL -lGL \
+    && rm /tmp/mesa-egl-gles-smoke.c /tmp/mesa-glamor-shader-smoke.c \
     && chmod 0755 /usr/local/ans/bin/mesa25-run \
     && test -f /usr/local/ans/lib/dri/panfrost_dri.so \
     && test -f /usr/local/ans/lib/dri/panthor_dri.so \
     && test -f /usr/local/ans/lib/dri/rockchip_dri.so \
+    && test -f /usr/local/ans/lib/dri/swrast_dri.so \
     && test -f /usr/local/ans/lib/libEGL_mesa.so.0 \
     && test -f /usr/local/ans/lib/libgbm.so.1 \
     && test -f /usr/local/ans/lib/libdrm.so.2 \
@@ -137,17 +145,37 @@ RUN cc -O2 -Wall -Wextra -o /usr/local/ans/bin/mesa-egl-gles-smoke \
         /usr/local/ans/share/glvnd/egl_vendor.d/50_mesa.json \
     && grep -q '"/usr/local/ans/lib/libEGL_mesa.so.0"' \
         /usr/local/ans/share/glvnd/egl_vendor.d/50_mesa.json
+COPY packaging/mesa25-local/postinst packaging/mesa25-local/postrm \
+    /work/mesa-maintainer-scripts/
+COPY packaging/mesa25-local/lightdm.conf \
+    /work/mesa-lightdm.conf
+COPY packaging/mesa25-local/lightdm-xserver.conf \
+    /work/mesa-lightdm-xserver.conf
+COPY packaging/mesa25-local/20-modesetting.conf \
+    /usr/local/ans/share/obs-buildenv/mesa25-xorg.conf
+RUN mkdir -p /usr/local/ans/share/obs-buildenv/xorg.conf.d
 RUN mkdir -p /work/mesa-pkg/usr/local /work/mesa-pkg/DEBIAN \
-        /work/mesa-pkg/etc/ld.so.conf.d /out/mesa \
+        /work/mesa-pkg/etc/ld.so.conf.d \
+        /work/mesa-pkg/etc/systemd/system/lightdm.service.d \
+        /work/mesa-pkg/etc/lightdm/lightdm.conf.d /out/mesa \
     && cp -a /usr/local/ans /work/mesa-pkg/usr/local/ \
+    && cp /work/mesa-lightdm.conf \
+        /work/mesa-pkg/etc/systemd/system/lightdm.service.d/mesa25-local.conf \
+    && cp /work/mesa-lightdm-xserver.conf \
+        /work/mesa-pkg/etc/lightdm/lightdm.conf.d/90-mesa25-local.conf \
+    && cp /work/mesa-maintainer-scripts/postinst \
+        /work/mesa-maintainer-scripts/postrm /work/mesa-pkg/DEBIAN/ \
     && printf '%s\n' \
-        'Package: mesa25-rk3588-local' \
-        'Version: 25.0.7-2~ans1' \
+        'Package: mesa25-local' \
+        'Version: 25.0.7-8~ans1' \
         'Section: libs' \
         'Priority: optional' \
         'Architecture: arm64' \
         'Maintainer: OakSeries <local@oakseries>' \
-        'Depends: libc6, libgcc-s1, libstdc++6, libegl1, libgles2, libglvnd0,' \
+        'Provides: mesa25-rk3588-local (= 25.0.7-8~ans1)' \
+        'Conflicts: mesa25-rk3588-local' \
+        'Replaces: mesa25-rk3588-local' \
+        'Depends: libc6, libgcc-s1, libstdc++6, libegl1, libgles2, libgl1, libglvnd0,' \
         ' libexpat1, libudev1,' \
         ' libx11-6, libx11-xcb1, libxcb1, libxcb-dri2-0, libxcb-dri3-0,' \
         ' libxcb-glx0, libxcb-present0, libxcb-randr0, libxcb-shm0,' \
@@ -156,16 +184,16 @@ RUN mkdir -p /work/mesa-pkg/usr/local /work/mesa-pkg/DEBIAN \
         'Description: Mesa 25.0.7 panfrost EGL/GLES/GBM stack for RK3588 Debian 11' \
         ' Built with libdrm 2.4.124 for the panthor kernel driver. Installs' \
         ' runtime libraries, development metadata, and an EGL/GLES smoke test' \
-        ' under /usr/local/ans while retaining the Debian GLVND dispatch ABI.' \
+        ' under /usr/local/ans. Keeps Debian Mesa/GLVND packages installed while' \
+        ' making Mesa 25 the default LightDM/Xorg and system graphics stack.' \
+        ' Uses the stable Xorg software 2D cursor path on RK3588 while EGL,' \
+        ' GLES, GLX, and GBM clients remain hardware accelerated by Panfrost.' \
         > /work/mesa-pkg/DEBIAN/control \
     && printf '%s\n' '/usr/local/ans/lib' \
-        > /work/mesa-pkg/etc/ld.so.conf.d/00-mesa25-rk3588-local.conf \
-    && printf '%s\n' '#!/bin/sh' 'set -e' 'ldconfig 2>/dev/null || true' \
-        > /work/mesa-pkg/DEBIAN/postinst \
-    && cp /work/mesa-pkg/DEBIAN/postinst /work/mesa-pkg/DEBIAN/postrm \
+        > /work/mesa-pkg/etc/ld.so.conf.d/00-mesa25-local.conf \
     && chmod 0755 /work/mesa-pkg/DEBIAN/postinst /work/mesa-pkg/DEBIAN/postrm \
     && dpkg-deb --build --root-owner-group /work/mesa-pkg \
-        /out/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb \
+        /out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
     && ( cd /out/mesa && sha256sum *.deb > SHA256SUMS )
 
 FROM base AS qt6
@@ -358,6 +386,11 @@ COPY --from=mpp /out/mpp /mpp
 COPY --from=ffmpeg6 /out/ffmpeg /ffmpeg
 
 FROM base AS obs-builder
+ARG OBS_BUILDENV_VERSION=0.2.0
+LABEL org.opencontainers.image.title="obs-buildenv" \
+      org.opencontainers.image.description="OBS build environment for RK3588 Debian 11 arm64" \
+      org.opencontainers.image.version="${OBS_BUILDENV_VERSION}" \
+      org.opencontainers.image.source="https://github.com/whoarei/obs-buildenv"
 COPY --from=mesa25 /out/mesa /tmp/debs/mesa
 COPY --from=mesa25 /out/mesa /opt/obs-buildenv/debs/mesa
 COPY --from=qt6 /out/qt6 /tmp/debs/qt6
@@ -369,7 +402,7 @@ RUN cd /tmp/vendor-rk3588 \
     && dpkg -i \
         librga2_2.2.0-1_arm64.deb \
         librga-dev_2.2.0-1_arm64.deb \
-        /tmp/debs/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb \
+        /tmp/debs/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
         /tmp/debs/mpp/rockchip-mpp-local_1.3.9-1~ans1_arm64.deb \
         /tmp/debs/qt6/qt6.2-gles-local_6.2.4-1~ans1_arm64.deb \
         /tmp/debs/ffmpeg/ffmpeg6.1-ans-local_6.1.6-1~ans1_arm64.deb \

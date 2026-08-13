@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+MALI_CONF=/etc/ld.so.conf.d/00-aarch64-mali.conf
+MALI_DIVERT=/etc/ld.so.conf.d/00-aarch64-mali.conf.disabled-by-mesa25-local
+
+# Keep the BSP package installed for dpkg dependency compatibility, but prevent
+# its incompatible G52 loader directory from taking precedence over GLVND and
+# the RK3588 Mesa 25 stack. A dpkg diversion survives libmali upgrades.
+divert_package=$(dpkg-divert --listpackage "$MALI_CONF" 2>/dev/null || true)
+if [ -z "$divert_package" ]; then
+    dpkg-divert --package mesa25-local --add --rename \
+        --divert "$MALI_DIVERT" "$MALI_CONF"
+elif [ "$divert_package" != mesa25-local ]; then
+    echo "mesa25-local: $MALI_CONF is already diverted by $divert_package" >&2
+    exit 1
+fi
+
+ldconfig 2>/dev/null || true
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+exit 0

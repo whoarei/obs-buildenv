@@ -6,22 +6,26 @@
 
 ## 获取依赖 deb（GitHub Release）
 
-每次推送 `v*` tag 会触发 CI：构建镜像、导出四个依赖 deb 并自动发布到对应 tag 的 **Release**。workflow 手动触发或推送 `mesa-25.0.7` 分支时也会在原生 arm64 runner 构建，但只上传 Actions artifact，不创建 Release。
+每次推送 `v*` tag 会触发 CI：构建镜像、导出四个依赖 deb 并自动发布到对应 tag 的 **Release**。workflow 也可手动触发，在原生 arm64 runner 构建并上传 Actions artifact，但不会创建 Release。
 
 到 [Releases](https://github.com/whoarei/obs-buildenv/releases) 下载附件：
 
 | 包 | 版本 | 作用 |
 | --- | --- | --- |
-| `mesa25-rk3588-local` | 25.0.7 | Mesa panfrost EGL/GLES/GBM + libdrm 2.4.124，支持 panthor 内核驱动 |
+| `mesa25-local` | 25.0.7 | Mesa Panfrost EGL/GLES/GLX/GBM + libdrm 2.4.124，并把 LightDM/Xorg 默认栈切到 panthor |
 | `qt6.2-gles-local` | 6.2.4 | Qt 6.2.4（qtbase + qtsvg，`-opengl es2`，无 desktop GL） |
 | `rockchip-mpp-local` | 1.3.9 | nyanmisaka/mpp jellyfin-mpp，硬编解码库 |
 | `ffmpeg6.1-ans-local` | 6.1.6 | ffmpeg-rockchip 6.1，rkmpp/rkrga 硬编解 |
 
-- 四个包统一安装到 `/usr/local/ans`。Mesa 通过 GLVND vendor JSON 和 DRI 路径选择，Qt/FFmpeg 依靠独立 SONAME 或前缀，与 Debian 11 系统包共存。
+- 四个包统一安装到 `/usr/local/ans`。`mesa25-local` 保留 Debian Mesa、GLVND 和
+  BSP libmali 包以维持 APT 关系，但停用不兼容的 G52 libmali loader 路径，并让
+  Mesa 25 成为系统、LightDM 和 Xorg 的默认图形栈。
+- RK3588 的 Debian 11 Xorg 1.20 glamor 路径无法显示软件光标；包默认让 Xorg
+  使用稳定的软件 2D/ShadowFB，EGL/GLES/GLX 应用仍使用 Panfrost 硬件加速。
 - `ffmpeg6.1-ans-local` 依赖 `rockchip-mpp-local` 与 `librga2`（librga 为设备 BSP 包，目标机通常已自带）。
-- 附件含各目录的 `SHA256SUMS`，下载后先校验：
+- Release 附件含统一的 `SHA256SUMS`，下载后先校验：
   ```sh
-  sha256sum -c mesa/SHA256SUMS qt6/SHA256SUMS mpp/SHA256SUMS ffmpeg/SHA256SUMS
+  sha256sum -c SHA256SUMS
   ```
 
 ## 获取镜像
@@ -31,6 +35,9 @@
 ```sh
 docker pull --platform linux/arm64 ghcr.io/whoarei/obs-buildenv:latest
 ```
+
+Mesa 与 OBS 的最短安装、升级和回滚步骤见
+[MESA-OBS-INSTALL.md](MESA-OBS-INSTALL.md)。
 
 ### 在 x86_64 主机上运行
 
@@ -67,7 +74,7 @@ docker run --rm \
 - 自定义产物包名：`-e DEBIAN_PACKAGE_NAME=obs-studio-<version>`（默认 `obs-studio-baseline`，编非基线版本时建议覆盖）。
 - 镜像内已设 `PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig` 与 `PATH=/usr/local/ans/bin:...`，OBS 的 FindFFmpeg 优先选中自编译 FFmpeg 6.1.6 而非系统 4.3。
 
-产物 `obs-studio-baseline` deb 安装到目标机时，与依赖 deb 一同安装（`dpkg -i mesa25-rk3588-local*.deb qt6.2-gles-local*.deb rockchip-mpp-local*.deb ffmpeg6.1-ans-local*.deb obs-studio-baseline*.deb`）。
+产物 `obs-studio-baseline` deb 安装到目标机时，与依赖 deb 一同安装（`dpkg -i mesa25-local*.deb qt6.2-gles-local*.deb rockchip-mpp-local*.deb ffmpeg6.1-ans-local*.deb obs-studio-baseline*.deb`）。
 
 ### Mesa 25.0.7 源码上下文
 
@@ -92,11 +99,14 @@ git -C ../mesa worktree add --detach ../mesa-25.0.7 mesa-25.0.7
 完整的安装、测试、动态库加载链复核和结果文件采集步骤见
 [MESA25-EGL-GLES-TEST.md](MESA25-EGL-GLES-TEST.md)。
 
-`mesa25-run` 除了固定 Mesa vendor、DRI、GBM 路径，还会显式选择 Debian
-GLVND dispatcher。部分 RK3588 BSP 会让厂商 Mali `libEGL.so.1` 在
-`ld.so.cache` 中排到 GLVND 前面，直接启动程序会绕过 Mesa vendor；需要使用
-Mesa 25 的 EGL/GLES 程序统一通过该入口启动。OBS deb 的桌面文件已自动使用
-`mesa25-run`，命令行启动可执行：
+libdrm 2.4.124 的 HDMI KMS 屏幕扫描输出和 60 秒 page-flip 测试见
+[LIBDRM-KMS-SCREEN-TEST.md](LIBDRM-KMS-SCREEN-TEST.md)。
+
+`mesa25-local` 安装时会通过 dpkg diversion 停用 BSP 的
+`00-aarch64-mali.conf`，同时为 LightDM 配置 Mesa 25 的 GLVND、DRI 和 GBM
+路径。普通程序可直接使用系统默认 Mesa 25；`mesa25-run` 仍保留作为诊断入口，
+用于显式固定 Mesa vendor、DRI、GBM 路径和 Debian GLVND dispatcher。OBS deb
+的桌面文件也继续使用该入口：
 
 ```sh
 /usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs
@@ -137,8 +147,11 @@ docker run --rm \
 | 文件/目录 | 作用 |
 | --- | --- |
 | `Dockerfile` | 多阶段：base → mesa25 / qt6 / mpp / ffmpeg6（依赖编译 + 打 deb，统一 prefix `/usr/local/ans`）→ obs-builder（开发镜像） |
+| `MESA-OBS-INSTALL.md` | Mesa 25、配套依赖和 OBS deb 的简要安装、升级与回滚手册 |
 | `mesa25-run` / `mesa-egl-gles-smoke.c` | 固定 Mesa 运行环境和验证 EGL 初始化、GLES 清屏、像素读回 |
+| `mesa-glamor-shader-smoke.c` | 复现 Debian 11 Xorg 1.20 glamor shader，验证 Mesa 25 的 Xorg 专用 GLSL 兼容规则 |
+| `libdrm-kms-screen-test.c` | 独占 DRM master，验证 HDMI KMS mode set、扫描输出和 page-flip |
 | `build-obs.sh` | 容器入口，`docker run` 时自动编译挂载进来的 OBS 源码 |
 | `cmake/cpack-desktop-integration.cmake` | 在 CPack 暂存目录中将菜单、图标和 metainfo 移到标准 XDG 路径 |
 | `vendor/rk3588/` | 设备 BSP 同版 librga deb（SHA-256 固定，构建期依赖） |
-| `.github/workflows/docker-build.yml` | 原生 arm64 CI：tag 发布 deb/镜像；手动或专用分支构建测试产物 |
+| `.github/workflows/docker-build.yml` | 原生 arm64 CI：tag 发布 deb/镜像；也支持手动构建 Actions artifact |

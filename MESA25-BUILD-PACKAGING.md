@@ -1,6 +1,6 @@
 # Mesa 25.0.7 编译与 deb 打包说明
 
-本文记录 `mesa25-rk3588-local` 安装到 RK3588 设备之前完成的源码确认、依赖准备、
+本文记录 `mesa25-local` 安装到 RK3588 设备之前完成的源码确认、依赖准备、
 容器编译、deb 打包和产物检查工作。设备侧的安装及 EGL/GLES 验收步骤见
 [MESA25-EGL-GLES-TEST.md](MESA25-EGL-GLES-TEST.md)。
 
@@ -24,17 +24,17 @@ workflow。Mesa、Qt、MPP、FFmpeg 和 OBS 继续共用当前 `Dockerfile`；�
 最终产物：
 
 ```text
-out/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb
+out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
 ```
 
 产物信息：
 
 ```text
-Package:      mesa25-rk3588-local
-Version:      25.0.7-2~ans1
+Package:      mesa25-local
+Version:      25.0.7-8~ans1
 Architecture: arm64
 Size:         约 4.2 MB
-SHA-256:      d01f8d25ea7f83479a54e287a837b0a198670f58bd02715e7c045fb25a7ce514
+SHA-256:      6d7c524540f7ad5d5b661e4b4d248a48c3ca62e717bf0d2f0e11ce4d26a8baf4
 ```
 
 ## 2. 为什么在现有 obs-buildenv 中编译
@@ -173,7 +173,7 @@ Mesa 配置时的 `PKG_CONFIG_PATH` 为：
 | `libdir` | `lib` | 库位于 `/usr/local/ans/lib` |
 | `buildtype` | `release` | 发布构建 |
 | `platforms` | `x11` | 构建 X11 EGL platform；surfaceless/DRM 仍由 EGL loader 支持 |
-| `gallium-drivers` | `panfrost` | Mali-G610/Panfrost，包含 panthor kmod 支持 |
+| `gallium-drivers` | `panfrost,softpipe` | Mali-G610/Panfrost + 无 LLVM 的 Mesa 25 软件回退 |
 | `egl` | `enabled` | 启用 EGL vendor |
 | `gbm` | `enabled` | 启用 GBM 和 DRI GBM backend |
 | `gles2` | `enabled` | 启用 GLES 2/3 API |
@@ -211,6 +211,7 @@ BuildKit 同时把 `/root/.cache/ccache` 作为 cache mount，方便重复构建
 /usr/local/ans/lib/dri/panfrost_dri.so
 /usr/local/ans/lib/dri/panthor_dri.so
 /usr/local/ans/lib/dri/rockchip_dri.so
+/usr/local/ans/lib/dri/swrast_dri.so
 /usr/local/ans/lib/libdrm.so.2.124.0
 ```
 
@@ -315,7 +316,7 @@ Mesa 的 GLVND vendor JSON 也被改为使用绝对路径：
 启动包装器复制到包根目录，并加入：
 
 ```text
-/etc/ld.so.conf.d/00-mesa25-rk3588-local.conf
+/etc/ld.so.conf.d/00-mesa25-local.conf
 ```
 
 内容为：
@@ -325,10 +326,32 @@ Mesa 的 GLVND vendor JSON 也被改为使用绝对路径：
 ```
 
 `postinst` 和 `postrm` 会执行 `ldconfig`，使安装或卸载后动态链接缓存及时更新。
+安装脚本还使用 `dpkg-divert` 将 BSP 的
+`/etc/ld.so.conf.d/00-aarch64-mali.conf` 移到
+`00-aarch64-mali.conf.disabled-by-mesa25-local`。厂商包本身保持安装，不再让其
+G52 EGL/GLES/GBM 库抢在 RK3588 Mesa 25 和 GLVND 之前；卸载 `mesa25-local` 时
+会自动恢复该文件。
 
-包名不替换 Debian 系统 Mesa 包，文件也不写入 `/usr/lib/aarch64-linux-gnu`。
-系统 Mesa、厂商 Mali 库和 `/usr/local/ans` Mesa 可以共存；需要使用 Mesa 25 的
-程序通过 `mesa25-run` 启动。
+RK3588 上 Debian 11 Xorg 1.20 的 glamor 路径能够生成正常 cursor 图像，却没有
+把它合成到最终 scanout。`mesa25-xorg` 因此通过 `-config` 和独立
+`-configdir` 加载包内光标兼容配置，使用 `AccelMethod=none`、`SWcursor=true`、
+`PageFlip=false` 和 `ShadowFB=true`。这只关闭 Xorg 服务器的 glamor/2D 加速，
+EGL、GLES、GLX 和 GBM 客户端仍通过 Panfrost 使用 Mali-G610。设备原有
+`/etc/X11/xorg.conf.d/20-modesetting.conf` 不会被修改或接管；卸载包后 LightDM
+恢复直接启动系统 Xorg，原 BSP 配置自然重新生效。
+
+包还安装 LightDM systemd drop-in，固定 Mesa 25 的 EGL vendor、GLX vendor、
+DRI 和 GBM 路径。由于 LightDM 会为 X server 重建、清理环境，包同时通过
+`xserver-command=/usr/local/ans/bin/mesa25-xorg` 启动 Xorg；包装器在直接
+`exec /usr/bin/X` 前设置相同变量，保证 Xorg 自身也继承这些路径。
+
+Debian 11 Xorg 1.20.11 的旧 glamor shader 没有声明
+`#version`，但使用了 `precision` 限定词；包内 Xorg 专用 driconf 仅对 `Xorg`
+设置 `force_glsl_version=130`，避免 Mesa 25 按 GLSL 1.10 解析后使 Xorg 退出。
+
+包不替换或删除 Debian 系统 Mesa、GLVND、libmali 文件，也不写入
+`/usr/lib/aarch64-linux-gnu`。这些包继续满足 APT 依赖，运行时由 Mesa 25 获得
+更高优先级。
 
 ## 10. 从本地镜像导出 deb
 
@@ -340,16 +363,20 @@ mkdir -p out/mesa
 
 docker run --rm \
   --platform linux/arm64 \
+  --user "$(id -u):$(id -g)" \
   --entrypoint /bin/sh \
   -v "$PWD/out/mesa:/export" \
   obs-buildenv:mesa25-local \
   -c 'cp -a /out/mesa/. /export/'
 ```
 
+`--user` 用于避免 NFS 工作区将容器 root 映射成 `nobody`，导致导出的目录和 deb
+无法由当前用户更新。
+
 导出内容：
 
 ```text
-out/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb
+out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
 out/mesa/SHA256SUMS
 ```
 
@@ -368,10 +395,10 @@ out/mesa/SHA256SUMS
 (cd out/mesa && sha256sum -c SHA256SUMS)
 
 dpkg-deb -I \
-  out/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb
+  out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
 
 dpkg-deb -f \
-  out/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb \
+  out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
   Package Version Architecture Installed-Size
 ```
 
@@ -379,7 +406,7 @@ dpkg-deb -f \
 
 ```sh
 dpkg-deb -c \
-  out/mesa/mesa25-rk3588-local_25.0.7-2~ans1_arm64.deb \
+  out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
   | grep -E '/usr/local/ans/(bin/mesa|lib/(libEGL_mesa|libgbm|libdrm|dri/(panthor|panfrost|rockchip)))'
 ```
 
@@ -448,7 +475,59 @@ panthor
 
 对应修正提交为 `3b07537`。
 
-### 12.3 编译器提示
+### 12.3 Xorg 1.20 glamor 的无版本 GLSL shader
+
+首次把 LightDM/Xorg 全局切换到 Mesa 25 后，Xorg 已经识别
+`Mali-G610 (Panfrost)` 并启用 glamor，但随后报错退出：
+
+```text
+Failed to compile VS: 0:1(1): error: syntax error, unexpected NEW_IDENTIFIER
+Fatal server error: GLSL compile failure
+```
+
+失败 shader 第一行是 `precision highp float;`，但没有 `#version`。Mesa 25 默认
+按 GLSL 1.10 解析，而 precision 限定词从 desktop GLSL 1.30 才允许。最终包加入：
+
+```text
+/usr/local/ans/share/drirc.d/01-xorg-glamor.conf
+```
+
+它只匹配可执行文件 `Xorg`，设置 `force_glsl_version=130`。包内
+`mesa-glamor-shader-smoke` 使用同一份 shader 做回归测试；禁用 shader cache 后
+已经确认普通进程仍失败、匹配为 Xorg 时通过。
+
+### 12.4 LightDM 清理 Xorg 环境导致的 AIGLX 混栈
+
+只给 LightDM systemd 单元设置环境变量时，LightDM 会在启动 X server 前重建环境，
+Xorg 因此没有收到 `LIBGL_DRIVERS_PATH`。GLX server 初始化曾加载系统 Mesa 20 的
+`swrast_dri.so`，并记录：
+
+```text
+AIGLX error: Calling driver entry point failed
+```
+
+最终包增加 `/usr/local/ans/bin/mesa25-xorg`，并通过 LightDM
+`xserver-command` 使用该包装器。包装器设置 GLVND、DRI 和 GBM 路径后直接
+`exec /usr/bin/X`。最终 Xorg 日志为：
+
+```text
+AIGLX: Loaded and initialized rockchip
+GLX: Initialized DRI2 GL provider for screen 0
+```
+
+Xorg maps 只包含 `/usr/local/ans` 的 `libdril_dri.so`、EGL、GBM、libdrm 和
+Gallium，不再加载系统 Mesa 20 或厂商 Mali 图形库。`glxinfo -B` 和 X11
+`glmark2-es2` 均继续使用 Mali-G610 / Mesa 25.0.7。
+
+### 12.5 Xorg glamor 下鼠标光标不可见
+
+切换到 Mesa 25 后，鼠标右键可以正常弹出菜单，但屏幕不显示指针。XFixes 读取到
+正常的 32×32 cursor 图像（336 个非透明像素，最大 alpha 255），证明输入设备、
+LXDE/Openbox 和光标主题均正常。`SWcursor=true` 单独启用后仍不可见；关闭 Xorg
+glamor 并启用 ShadowFB 后光标恢复。最终包因此使用上一节所述兼容配置，优先保证
+桌面可操作性；OBS 和其他 EGL/GLES 程序仍由 Mesa 25 Panfrost 硬件加速。
+
+### 12.6 编译器提示
 
 编译过程中出现过 GCC 9 之后结构体参数传递 ABI 变更的 note，以及少量非致命
 warning。它们没有造成编译、链接、`ldd -r` 或设备渲染失败，不属于交付阻塞项。
@@ -462,7 +541,7 @@ Qt 6.2.4、MPP 1.3.9 和 FFmpeg 6.1.6 已有可用 deb，本轮只验证 Mesa �
 OBS 打包依赖已经增加：
 
 ```text
-mesa25-rk3588-local (>= 25.0.7-2~ans1)
+mesa25-local (>= 25.0.7-8~ans1)
 ```
 
 OBS 的桌面入口也会通过以下命令启动，使 OBS 使用同一套 Mesa 25 环境：
@@ -499,7 +578,7 @@ OBS 的桌面入口也会通过以下命令启动，使 OBS 使用同一套 Mesa
   → 配置/编译/安装 Mesa 25.0.7 Panfrost
   → 检查 EGL/GBM/DRI/panthor 文件
   → 编译 EGL/GLES 冒烟测试
-  → 生成 mesa25-rk3588-local arm64 deb 和 SHA256SUMS
+  → 生成 mesa25-local arm64 deb 和 SHA256SUMS
   → 检查 deb control、文件表和 ELF 动态依赖
   → 上传并安装到 RK3588
   → 以 ans 用户执行 EGL/GLES 清屏和像素读回
@@ -508,3 +587,6 @@ OBS 的桌面入口也会通过以下命令启动，使 OBS 使用同一套 Mesa
 
 设备安装和结果采集请继续按
 [MESA25-EGL-GLES-TEST.md](MESA25-EGL-GLES-TEST.md) 执行。
+
+libdrm 2.4.124 的 HDMI KMS 扫描输出和 60 秒 page-flip 验收见
+[LIBDRM-KMS-SCREEN-TEST.md](LIBDRM-KMS-SCREEN-TEST.md)。
