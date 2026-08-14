@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 #
 # OBS 32.2.1 构建环境（Debian 11 arm64 / RK3588，x86_64 主机 + QEMU binfmt）
-# 计划文档：docs/obs-build-environment-plan.md
+# 计划文档：仓库 docs/ 目录（obs-rk3588-load-analysis.md 等）
 #
 # 阶段：
 #   base        依赖装齐的 Debian 11 arm64 基础（apt + cmake 3.28 + nlohmann_json，
 #               qt6 / mesa / mpp / ffmpeg 产物统一 prefix /usr/local/ans）
 #   mesa-build-base 从 base 派生并补 Meson 1.7.2 与 Mesa 专用构建依赖；
 #               不使稳定的 Qt / MPP / FFmpeg 缓存失效
-#   mesa25      从 mesa_source named context 编译 Mesa 25.0.7 + libdrm 2.4.124，
+#   mesa25      下载官方 Mesa 25.0.7 tar.xz 并编译 + libdrm 2.4.124，
 #               生成 mesa25-local deb（panfrost / EGL / GLES / GBM）
 #   qt6         Qt 6.2.4（-opengl es2）编译 + qt6.2-gles-local deb 打包
 #   mpp         nyanmisaka/mpp jellyfin-mpp（.pc 1.3.9）编译 + rockchip-mpp-local deb 打包
@@ -17,6 +17,46 @@
 #   debs        汇集四个依赖 deb 用于 --output 导出
 #   obs-builder 最终开发镜像（装齐四个 deb + 基线构建所需 desktop GL 开发包），
 #               入口 build-obs.sh 在 docker run 时构建挂载进来的 OBS 源码
+
+# ---------------------------------------------------------------------------
+# 版本号统一定义：升级任一组件只需改这一块（各 stage 用不带默认值的
+# 同名 ARG 继承）。deb 包版本 = <上游版本>-<DEB_REVISION>，在 RUN 内拼接。
+# 注意：带 SHA256 固定的组件改版本时必须同步更新对应 *_SHA256 / *_URL。
+# ---------------------------------------------------------------------------
+ARG CMAKE_VERSION=3.28.6
+ARG CMAKE_SHA256=7909cc2128ce9442c63ce674a0bfb0e4f4ce04cef667d887e15ad5670d594ba7
+ARG NLOHMANN_VERSION=3.11.3
+ARG NLOHMANN_SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+# pypi 下载路径含内容哈希，升级 Meson 时 URL / SHA256 必须与 MESON_VERSION 一起换
+ARG MESON_VERSION=1.7.2
+ARG MESON_SHA256=82c6818dc81743c96de3a458f06175776ebfde4081195ea31ea6971838f25e38
+ARG MESON_URL=https://files.pythonhosted.org/packages/e5/2b/46bda4ef5a7ae4135dbfe27fc0368c44e5a349a897a54fdf2cedb8dcb66e/meson-1.7.2-py3-none-any.whl
+# Mesa 源码在构建时从官方 archive 下载 tar.xz 并 SHA256 校验（与
+# MPP / FFmpeg 同模式）；升级时 URL / SHA256 必须与 MESA_VERSION 一起换
+ARG MESA_VERSION=25.0.7
+ARG MESA_DEB_REVISION=14~ans1
+ARG MESA_URL=https://archive.mesa3d.org/mesa-25.0.7.tar.xz
+ARG MESA_SHA256=592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6
+ARG LIBDRM_VERSION=2.4.124
+ARG LIBDRM_SHA256=ac36293f61ca4aafaf4b16a2a7afff312aa4f5c37c9fbd797de9e3c0863ca379
+ARG QT_VERSION=6.2.4
+ARG QT_DEB_REVISION=1~ans1
+ARG QTBASE_SHA256=d9924d6fd4fa5f8e24458c87f73ef3dfc1e7c9b877a5407c040d89e6736e2634
+ARG QTSVG_SHA256=23ec4c14259d799bb6aaf1a07559d6b1bd2cf6d0da3ac439221ebf9e46ff3fd2
+# MPP 以 commit 固定源码，改版本时 URL / SRCDIR / SHA256 必须一起换
+ARG MPP_VERSION=1.3.9
+ARG MPP_DEB_REVISION=1~ans1
+ARG MPP_URL=https://codeload.github.com/nyanmisaka/mpp/tar.gz/a9380ef3
+ARG MPP_SRCDIR=mpp-a9380ef3
+ARG MPP_SHA256=a82bf749bdfc6d90775f9bbc36e8d93ec826703dcafee7236c4c24436e0c0768
+# FFmpeg 以 commit 固定源码，改版本时 URL / SRCDIR / SHA256 必须一起换
+ARG FFMPEG_VERSION=6.1.6
+ARG FFMPEG_DEB_REVISION=1~ans1
+ARG FFMPEG_URL=https://codeload.github.com/nyanmisaka/ffmpeg-rockchip/tar.gz/705345ee866866d3ea5521c89c5abd9d0b0a245b
+ARG FFMPEG_SRCDIR=ffmpeg-rockchip-705345ee866866d3ea5521c89c5abd9d0b0a245b
+ARG FFMPEG_SHA256=d238fd9ea7f497f8a4963a65819a2044be0f5ef82633c1fca31a127c464e67f7
+ARG LIBRGA_VERSION=2.2.0-1
+ARG OBS_BUILDENV_VERSION=0.2.0
 
 FROM arm64v8/debian:11@sha256:9690447ddac1819c12c69aca67a003baa947887c504ba6308d19ab8067d148c7 AS base
 ENV DEBIAN_FRONTEND=noninteractive
@@ -43,16 +83,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libva-dev libmbedtls-dev file \
     && rm -rf /var/lib/apt/lists/*
 
-ARG CMAKE_SHA256=7909cc2128ce9442c63ce674a0bfb0e4f4ce04cef667d887e15ad5670d594ba7
-ARG CMAKE_VERSION=3.28.6
+ARG CMAKE_VERSION
+ARG CMAKE_SHA256
 RUN curl -fsSL -o /tmp/cmake.tar.gz \
         https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-aarch64.tar.gz \
     && echo "${CMAKE_SHA256}  /tmp/cmake.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/cmake.tar.gz -C /usr/local --strip-components=1 \
     && rm /tmp/cmake.tar.gz
 
-ARG NLOHMANN_SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
-ARG NLOHMANN_VERSION=3.11.3
+ARG NLOHMANN_VERSION
+ARG NLOHMANN_SHA256
 RUN curl -fsSL -o /tmp/json.tar.xz \
         https://github.com/nlohmann/json/releases/download/v${NLOHMANN_VERSION}/json.tar.xz \
     && echo "${NLOHMANN_SHA256}  /tmp/json.tar.xz" | sha256sum -c - \
@@ -61,9 +101,7 @@ RUN curl -fsSL -o /tmp/json.tar.xz \
     && cmake --install /tmp/json-build \
     && rm -rf /tmp/json.tar.xz /tmp/json-src /tmp/json-build
 
-# Mesa 源码不复制进仓库镜像上下文：本地构建用
-#   --build-context mesa_source=../mesa-25.0.7
-# CI 则浅克隆官方 mesa-25.0.7 tag 后以同名 context 注入。
+# Mesa 源码在构建时从官方 archive 下载 tar.xz（SHA256 固定，见顶部版本区）。
 # Mesa 25.0.7 要求 libdrm >= 2.4.109，Debian 11 仅有 2.4.104，故先在
 # 同一 stage / 同一 prefix 构建 libdrm 2.4.124，再编译 panfrost 用户态驱动。
 FROM base AS mesa-build-base
@@ -73,17 +111,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxcb-dri3-dev libxcb-present-dev libxrandr-dev \
         libxshmfence-dev libxxf86vm-dev \
     && rm -rf /var/lib/apt/lists/*
-ARG MESON_SHA256=82c6818dc81743c96de3a458f06175776ebfde4081195ea31ea6971838f25e38
-ARG MESON_URL=https://files.pythonhosted.org/packages/e5/2b/46bda4ef5a7ae4135dbfe27fc0368c44e5a349a897a54fdf2cedb8dcb66e/meson-1.7.2-py3-none-any.whl
-RUN curl -fsSL -o /tmp/meson-1.7.2-py3-none-any.whl ${MESON_URL} \
-    && echo "${MESON_SHA256}  /tmp/meson-1.7.2-py3-none-any.whl" | sha256sum -c - \
-    && python3 -m pip install --no-cache-dir --no-deps /tmp/meson-1.7.2-py3-none-any.whl \
-    && test "$(meson --version)" = 1.7.2 \
-    && rm /tmp/meson-1.7.2-py3-none-any.whl
+ARG MESON_VERSION
+ARG MESON_SHA256
+ARG MESON_URL
+RUN curl -fsSL -o /tmp/meson-${MESON_VERSION}-py3-none-any.whl ${MESON_URL} \
+    && echo "${MESON_SHA256}  /tmp/meson-${MESON_VERSION}-py3-none-any.whl" | sha256sum -c - \
+    && python3 -m pip install --no-cache-dir --no-deps /tmp/meson-${MESON_VERSION}-py3-none-any.whl \
+    && test "$(meson --version)" = "${MESON_VERSION}" \
+    && rm /tmp/meson-${MESON_VERSION}-py3-none-any.whl
 
 FROM mesa-build-base AS mesa25
-ARG LIBDRM_VERSION=2.4.124
-ARG LIBDRM_SHA256=ac36293f61ca4aafaf4b16a2a7afff312aa4f5c37c9fbd797de9e3c0863ca379
+ARG LIBDRM_VERSION
+ARG LIBDRM_SHA256
+ARG MESA_VERSION
+ARG MESA_DEB_REVISION
+ARG MESA_URL
+ARG MESA_SHA256
 ARG LIBDRM_URL=https://dri.freedesktop.org/libdrm/libdrm-${LIBDRM_VERSION}.tar.xz
 WORKDIR /build/mesa25
 RUN curl -fsSL -o libdrm.tar.xz ${LIBDRM_URL} \
@@ -103,8 +146,11 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && meson compile -C build-libdrm -j "$(nproc)" \
     && meson install -C build-libdrm \
     && test "$(PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig pkg-config --modversion libdrm)" = "${LIBDRM_VERSION}"
-COPY --from=mesa_source / /build/mesa25/src
-RUN test "$(cat /build/mesa25/src/VERSION)" = 25.0.7
+RUN curl -fsSL -o mesa.tar.xz ${MESA_URL} \
+    && echo "${MESA_SHA256}  mesa.tar.xz" | sha256sum -c - \
+    && mkdir src && tar -xJf mesa.tar.xz -C src --strip-components=1 \
+    && rm mesa.tar.xz \
+    && test "$(cat src/VERSION)" = "${MESA_VERSION}"
 ENV PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig
 RUN --mount=type=cache,target=/root/.cache/ccache \
     CC='ccache gcc' CXX='ccache g++' meson setup build-mesa src \
@@ -165,41 +211,48 @@ RUN mkdir -p /work/mesa-pkg/usr/local /work/mesa-pkg/DEBIAN \
         /work/mesa-pkg/etc/lightdm/lightdm.conf.d/90-mesa25-local.conf \
     && cp /work/mesa-maintainer-scripts/postinst \
         /work/mesa-maintainer-scripts/postrm /work/mesa-pkg/DEBIAN/ \
+    && MESA_DEB_VERSION="${MESA_VERSION}-${MESA_DEB_REVISION}" \
     && printf '%s\n' \
         'Package: mesa25-local' \
-        'Version: 25.0.7-8~ans1' \
+        "Version: ${MESA_DEB_VERSION}" \
         'Section: libs' \
         'Priority: optional' \
         'Architecture: arm64' \
         'Maintainer: OakSeries <local@oakseries>' \
-        'Provides: mesa25-rk3588-local (= 25.0.7-8~ans1)' \
+        "Provides: mesa25-rk3588-local (= ${MESA_DEB_VERSION})" \
         'Conflicts: mesa25-rk3588-local' \
         'Replaces: mesa25-rk3588-local' \
-        'Depends: libc6, libgcc-s1, libstdc++6, libegl1, libgles2, libgl1, libglvnd0,' \
+        'Depends: xserver-common (>= 2:1.20.11-1+deb11u17),' \
+        ' xserver-xorg-core (>= 2:1.20.11-1+deb11u17),' \
+        ' libc6, libgcc-s1, libstdc++6, libegl1, libgles2, libgl1, libglvnd0,' \
         ' libexpat1, libudev1,' \
         ' libx11-6, libx11-xcb1, libxcb1, libxcb-dri2-0, libxcb-dri3-0,' \
         ' libxcb-glx0, libxcb-present0, libxcb-randr0, libxcb-shm0,' \
         ' libxcb-sync1, libxcb-xfixes0, libxext6, libxfixes3,' \
         ' libxshmfence1, libxxf86vm1, zlib1g' \
-        'Description: Mesa 25.0.7 panfrost EGL/GLES/GBM stack for RK3588 Debian 11' \
-        ' Built with libdrm 2.4.124 for the panthor kernel driver. Installs' \
+        "Description: Mesa ${MESA_VERSION} panfrost EGL/GLES/GBM stack for RK3588 Debian 11" \
+        " Built with libdrm ${LIBDRM_VERSION} for the panthor kernel driver. Installs" \
         ' runtime libraries, development metadata, and an EGL/GLES smoke test' \
         ' under /usr/local/ans. Keeps Debian Mesa/GLVND packages installed while' \
         ' making Mesa 25 the default LightDM/Xorg and system graphics stack.' \
-        ' Uses the stable Xorg software 2D cursor path on RK3588 while EGL,' \
-        ' GLES, GLX, and GBM clients remain hardware accelerated by Panfrost.' \
+        ' Requires the Debian Xorg security update without the broken BSP' \
+        ' FlipFB extension, and uses glamor/DRI3 without page flips.' \
         > /work/mesa-pkg/DEBIAN/control \
     && printf '%s\n' '/usr/local/ans/lib' \
         > /work/mesa-pkg/etc/ld.so.conf.d/00-mesa25-local.conf \
     && chmod 0755 /work/mesa-pkg/DEBIAN/postinst /work/mesa-pkg/DEBIAN/postrm \
     && dpkg-deb --build --root-owner-group /work/mesa-pkg \
-        /out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
+        "/out/mesa/mesa25-local_${MESA_DEB_VERSION}_arm64.deb" \
     && ( cd /out/mesa && sha256sum *.deb > SHA256SUMS )
 
+FROM scratch AS mesa-debs
+COPY --from=mesa25 /out/mesa /
+
 FROM base AS qt6
-ARG QTSVG_SHA256=23ec4c14259d799bb6aaf1a07559d6b1bd2cf6d0da3ac439221ebf9e46ff3fd2
-ARG QTBASE_SHA256=d9924d6fd4fa5f8e24458c87f73ef3dfc1e7c9b877a5407c040d89e6736e2634
-ARG QT_VERSION=6.2.4
+ARG QT_VERSION
+ARG QTBASE_SHA256
+ARG QTSVG_SHA256
+ARG QT_DEB_REVISION
 WORKDIR /build/qt
 RUN curl -fsSL -O \
         https://download.qt.io/archive/qt/6.2/${QT_VERSION}/submodules/qtbase-everywhere-src-${QT_VERSION}.tar.xz \
@@ -238,14 +291,15 @@ RUN if readelf -d /usr/local/ans/lib/libQt6Gui.so.6 | grep -q 'NEEDED.*libGL\.so
     fi
 RUN mkdir -p /work/qt6-pkg/usr/local /work/qt6-pkg/DEBIAN /work/qt6-pkg/etc/ld.so.conf.d /out/qt6 \
     && cp -a /usr/local/ans /work/qt6-pkg/usr/local/ \
+    && QT_DEB_VERSION="${QT_VERSION}-${QT_DEB_REVISION}" \
     && printf '%s\n' \
         'Package: qt6.2-gles-local' \
-        'Version: 6.2.4-1~ans1' \
+        "Version: ${QT_DEB_VERSION}" \
         'Section: libs' \
         'Priority: optional' \
         'Architecture: arm64' \
         'Maintainer: OakSeries <local@oakseries>' \
-        'Description: Qt 6.2.4 LTS (qtbase + qtsvg) for RK3588 Debian 11' \
+        "Description: Qt ${QT_VERSION} LTS (qtbase + qtsvg) for RK3588 Debian 11" \
         ' Built in a Debian 11 arm64 container with -opengl es2 (GLES-only,' \
         ' no desktop GL). Installs to /usr/local/ans and coexists with the' \
         ' system Qt5 packages.' \
@@ -256,7 +310,7 @@ RUN mkdir -p /work/qt6-pkg/usr/local /work/qt6-pkg/DEBIAN /work/qt6-pkg/etc/ld.s
         > /work/qt6-pkg/DEBIAN/postinst \
     && chmod 0755 /work/qt6-pkg/DEBIAN/postinst \
     && dpkg-deb --build --root-owner-group /work/qt6-pkg \
-        /out/qt6/qt6.2-gles-local_6.2.4-1~ans1_arm64.deb \
+        "/out/qt6/qt6.2-gles-local_${QT_DEB_VERSION}_arm64.deb" \
     && ( cd /out/qt6 && sha256sum *.deb > SHA256SUMS )
 
 # librockchip_mpp：设备 BSP（1.5.0-1）实为 1.3.8 代 API，缺
@@ -266,10 +320,11 @@ RUN mkdir -p /work/qt6-pkg/usr/local /work/qt6-pkg/DEBIAN /work/qt6-pkg/etc/ld.s
 # 源码无法构建，弃用），安装入 /usr/local/ans 并独立打包
 # rockchip-mpp-local deb 分发（ffmpeg deb 只声明 Depends，不随包携带 mpp）。
 FROM base AS mpp
-ARG MPP_VERSION=1.3.9
-ARG MPP_URL=https://codeload.github.com/nyanmisaka/mpp/tar.gz/a9380ef3
-ARG MPP_SHA256=a82bf749bdfc6d90775f9bbc36e8d93ec826703dcafee7236c4c24436e0c0768
-ARG MPP_SRCDIR=mpp-a9380ef3
+ARG MPP_VERSION
+ARG MPP_URL
+ARG MPP_SHA256
+ARG MPP_SRCDIR
+ARG MPP_DEB_REVISION
 WORKDIR /build/mpp
 RUN curl -fsSL -o mpp.tar.gz ${MPP_URL} \
     && echo "${MPP_SHA256}  mpp.tar.gz" | sha256sum -c - \
@@ -288,16 +343,17 @@ RUN test -f /usr/local/ans/lib/pkgconfig/rockchip_mpp.pc \
     && grep -rq mpp_buffer_sync_partial_end /usr/local/ans/include/rockchip/
 RUN mkdir -p /work/mpp-pkg/usr/local /work/mpp-pkg/DEBIAN /work/mpp-pkg/etc/ld.so.conf.d /out/mpp \
     && cp -a /usr/local/ans /work/mpp-pkg/usr/local/ \
+    && MPP_DEB_VERSION="${MPP_VERSION}-${MPP_DEB_REVISION}" \
     && printf '%s\n' \
         'Package: rockchip-mpp-local' \
-        'Version: 1.3.9-1~ans1' \
+        "Version: ${MPP_DEB_VERSION}" \
         'Section: libs' \
         'Priority: optional' \
         'Architecture: arm64' \
         'Maintainer: OakSeries <local@oakseries>' \
         'Description: Rockchip MPP (librockchip_mpp, nyanmisaka/mpp jellyfin-mpp) for RK3588 Debian 11' \
         ' Built from nyanmisaka/mpp commit a9380ef3 (jellyfin-mpp branch, .pc' \
-        ' version 1.3.9) in a Debian 11 arm64 container. Installs to' \
+        " version ${MPP_VERSION}) in a Debian 11 arm64 container. Installs to" \
         ' /usr/local/ans and coexists with the device BSP mpp (the BSP' \
         ' 1.5.0-1 package ships 1.3.8-era API, too old for ffmpeg-rockchip 6.1).' \
         > /work/mpp-pkg/DEBIAN/control \
@@ -307,7 +363,7 @@ RUN mkdir -p /work/mpp-pkg/usr/local /work/mpp-pkg/DEBIAN /work/mpp-pkg/etc/ld.s
         > /work/mpp-pkg/DEBIAN/postinst \
     && chmod 0755 /work/mpp-pkg/DEBIAN/postinst \
     && dpkg-deb --build --root-owner-group /work/mpp-pkg \
-        /out/mpp/rockchip-mpp-local_1.3.9-1~ans1_arm64.deb \
+        "/out/mpp/rockchip-mpp-local_${MPP_DEB_VERSION}_arm64.deb" \
     && ( cd /out/mpp && sha256sum *.deb > SHA256SUMS )
 
 FROM base AS ffmpeg6
@@ -315,17 +371,22 @@ FROM base AS ffmpeg6
 # 源码 tarball 以 commit + SHA-256 固定；librockchip_mpp 消费 mpp 阶段产出的
 # rockchip-mpp-local deb（打包前 dpkg -r 移除，不随本 deb 分发）；
 # librga 为设备 BSP 同版 deb，vendored 于 vendor/rk3588/（SHA256SUMS 固定）。
-ARG FFMPEG_URL=https://codeload.github.com/nyanmisaka/ffmpeg-rockchip/tar.gz/705345ee866866d3ea5521c89c5abd9d0b0a245b
-ARG FFMPEG_SHA256=d238fd9ea7f497f8a4963a65819a2044be0f5ef82633c1fca31a127c464e67f7
-ARG FFMPEG_SRCDIR=ffmpeg-rockchip-705345ee866866d3ea5521c89c5abd9d0b0a245b
+ARG FFMPEG_VERSION
+ARG FFMPEG_URL
+ARG FFMPEG_SHA256
+ARG FFMPEG_SRCDIR
+ARG FFMPEG_DEB_REVISION
+ARG LIBRGA_VERSION
+ARG MPP_VERSION
+ARG MPP_DEB_REVISION
 COPY --from=mpp /out/mpp /tmp/mpp-deb
 COPY vendor/rk3588 /tmp/vendor-rk3588
-RUN dpkg -i /tmp/mpp-deb/rockchip-mpp-local_1.3.9-1~ans1_arm64.deb \
+RUN dpkg -i "/tmp/mpp-deb/rockchip-mpp-local_${MPP_VERSION}-${MPP_DEB_REVISION}_arm64.deb" \
     && cd /tmp/vendor-rk3588 \
     && sha256sum -c SHA256SUMS \
     && dpkg -i \
-        librga2_2.2.0-1_arm64.deb \
-        librga-dev_2.2.0-1_arm64.deb
+        "librga2_${LIBRGA_VERSION}_arm64.deb" \
+        "librga-dev_${LIBRGA_VERSION}_arm64.deb"
 ENV PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig
 WORKDIR /build/ffmpeg
 RUN curl -fsSL -o ffmpeg-rockchip.tar.gz ${FFMPEG_URL} \
@@ -354,17 +415,19 @@ RUN test -x /usr/local/ans/bin/ffmpeg \
 RUN dpkg -r rockchip-mpp-local \
     && mkdir -p /work/ffmpeg-pkg/usr/local /work/ffmpeg-pkg/DEBIAN /work/ffmpeg-pkg/etc/ld.so.conf.d /out/ffmpeg \
     && cp -a /usr/local/ans /work/ffmpeg-pkg/usr/local/ \
+    && FFMPEG_DEB_VERSION="${FFMPEG_VERSION}-${FFMPEG_DEB_REVISION}" \
+    && MPP_DEB_VERSION="${MPP_VERSION}-${MPP_DEB_REVISION}" \
     && printf '%s\n' \
         'Package: ffmpeg6.1-ans-local' \
-        'Version: 6.1.6-1~ans1' \
+        "Version: ${FFMPEG_DEB_VERSION}" \
         'Section: libs' \
         'Priority: optional' \
         'Architecture: arm64' \
         'Maintainer: OakSeries <local@oakseries>' \
-        'Depends: rockchip-mpp-local (>= 1.3.9-1~ans1), librga2' \
+        "Depends: rockchip-mpp-local (>= ${MPP_DEB_VERSION}), librga2" \
         'Conflicts: ffmpeg6.1-oak-local' \
         'Replaces: ffmpeg6.1-oak-local' \
-        'Description: FFmpeg 6.1.6 (nyanmisaka/ffmpeg-rockchip 6.1 branch) for RK3588 Debian 11' \
+        "Description: FFmpeg ${FFMPEG_VERSION} (nyanmisaka/ffmpeg-rockchip 6.1 branch) for RK3588 Debian 11" \
         ' Shared libraries with rkmpp/rkrga hardware codec support, built in a' \
         ' Debian 11 arm64 container. Installs to /usr/local/ans and' \
         ' coexists with the system FFmpeg 4.3 (SONAMEs differ).' \
@@ -376,7 +439,7 @@ RUN dpkg -r rockchip-mpp-local \
         > /work/ffmpeg-pkg/DEBIAN/postinst \
     && chmod 0755 /work/ffmpeg-pkg/DEBIAN/postinst \
     && dpkg-deb --build --root-owner-group /work/ffmpeg-pkg \
-        /out/ffmpeg/ffmpeg6.1-ans-local_6.1.6-1~ans1_arm64.deb \
+        "/out/ffmpeg/ffmpeg6.1-ans-local_${FFMPEG_DEB_VERSION}_arm64.deb" \
     && ( cd /out/ffmpeg && sha256sum *.deb > SHA256SUMS )
 
 FROM scratch AS debs
@@ -386,7 +449,16 @@ COPY --from=mpp /out/mpp /mpp
 COPY --from=ffmpeg6 /out/ffmpeg /ffmpeg
 
 FROM base AS obs-builder
-ARG OBS_BUILDENV_VERSION=0.2.0
+ARG OBS_BUILDENV_VERSION
+ARG MESA_VERSION
+ARG MESA_DEB_REVISION
+ARG QT_VERSION
+ARG QT_DEB_REVISION
+ARG MPP_VERSION
+ARG MPP_DEB_REVISION
+ARG FFMPEG_VERSION
+ARG FFMPEG_DEB_REVISION
+ARG LIBRGA_VERSION
 LABEL org.opencontainers.image.title="obs-buildenv" \
       org.opencontainers.image.description="OBS build environment for RK3588 Debian 11 arm64" \
       org.opencontainers.image.version="${OBS_BUILDENV_VERSION}" \
@@ -400,12 +472,12 @@ COPY vendor/rk3588 /tmp/vendor-rk3588
 RUN cd /tmp/vendor-rk3588 \
     && sha256sum -c SHA256SUMS \
     && dpkg -i \
-        librga2_2.2.0-1_arm64.deb \
-        librga-dev_2.2.0-1_arm64.deb \
-        /tmp/debs/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
-        /tmp/debs/mpp/rockchip-mpp-local_1.3.9-1~ans1_arm64.deb \
-        /tmp/debs/qt6/qt6.2-gles-local_6.2.4-1~ans1_arm64.deb \
-        /tmp/debs/ffmpeg/ffmpeg6.1-ans-local_6.1.6-1~ans1_arm64.deb \
+        "librga2_${LIBRGA_VERSION}_arm64.deb" \
+        "librga-dev_${LIBRGA_VERSION}_arm64.deb" \
+        "/tmp/debs/mesa/mesa25-local_${MESA_VERSION}-${MESA_DEB_REVISION}_arm64.deb" \
+        "/tmp/debs/mpp/rockchip-mpp-local_${MPP_VERSION}-${MPP_DEB_REVISION}_arm64.deb" \
+        "/tmp/debs/qt6/qt6.2-gles-local_${QT_VERSION}-${QT_DEB_REVISION}_arm64.deb" \
+        "/tmp/debs/ffmpeg/ffmpeg6.1-ans-local_${FFMPEG_VERSION}-${FFMPEG_DEB_REVISION}_arm64.deb" \
     && rm -rf /tmp/debs
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1-mesa-dev libglvnd-dev \

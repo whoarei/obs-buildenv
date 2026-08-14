@@ -18,16 +18,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Checkout Mesa 25.0.7 source
-        shell: bash
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 --branch mesa-25.0.7 \
-            https://gitlab.freedesktop.org/mesa/mesa.git mesa-source
-          test "$(cat mesa-source/VERSION)" = 25.0.7
-          test "$(git -C mesa-source rev-parse HEAD)" = \
-            742a20f48c59e8649533c84c4d49dd95b403f5da
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -43,8 +33,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          build-contexts: |
-            mesa_source=./mesa-source
           platforms: linux/arm64
           target: debs
           outputs: type=local,dest=out
@@ -55,8 +43,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          build-contexts: |
-            mesa_source=./mesa-source
           platforms: linux/arm64
           target: obs-builder
           tags: |
