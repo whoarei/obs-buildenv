@@ -469,8 +469,12 @@ COPY --from=qt6 /out/qt6 /tmp/debs/qt6
 COPY --from=mpp /out/mpp /tmp/debs/mpp
 COPY --from=ffmpeg6 /out/ffmpeg /tmp/debs/ffmpeg
 COPY vendor/rk3588 /tmp/vendor-rk3588
+# mesa25-local 25.0.7-14 起 Depends 修正版 Xorg（>= 2:1.20.11-1+deb11u17），
+# 构建镜像与设备安装保持一致：先装 xserver 再 dpkg -i，避免依赖缺失中断。
 RUN cd /tmp/vendor-rk3588 \
     && sha256sum -c SHA256SUMS \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends xserver-common xserver-xorg-core \
     && dpkg -i \
         "librga2_${LIBRGA_VERSION}_arm64.deb" \
         "librga-dev_${LIBRGA_VERSION}_arm64.deb" \
@@ -478,7 +482,7 @@ RUN cd /tmp/vendor-rk3588 \
         "/tmp/debs/mpp/rockchip-mpp-local_${MPP_VERSION}-${MPP_DEB_REVISION}_arm64.deb" \
         "/tmp/debs/qt6/qt6.2-gles-local_${QT_VERSION}-${QT_DEB_REVISION}_arm64.deb" \
         "/tmp/debs/ffmpeg/ffmpeg6.1-ans-local_${FFMPEG_VERSION}-${FFMPEG_DEB_REVISION}_arm64.deb" \
-    && rm -rf /tmp/debs
+    && rm -rf /tmp/debs /var/lib/apt/lists/*
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1-mesa-dev libglvnd-dev \
     && rm -rf /var/lib/apt/lists/*
