@@ -18,6 +18,13 @@ fi
 
 ldconfig 2>/dev/null || true
 
+# Releases up to 25.0.7-13 installed a shaped X11 overlay as a cursor
+# workaround. Debian's corrected modesetting driver renders the standard Xorg
+# cursor normally, and keeping the overlay would duplicate the pointer and
+# retrigger window expose/copy damage. Remove the obsolete autostart entry when
+# upgrading from those releases.
+rm -f /etc/xdg/autostart/mesa25-pointer-arrow.desktop
+
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
 fi
