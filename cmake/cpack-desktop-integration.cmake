@@ -55,10 +55,10 @@ endif()
 
 string(REPLACE
   "Exec=obs"
-  "Exec=/usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs"
+  "Exec=/usr/bin/env PAN_MESA_DEBUG=gl3 /usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs"
   _desktop_contents
   "${_desktop_contents}"
 )
 file(WRITE "${_desktop_file}" "${_desktop_contents}")
 
-message(STATUS "Installed OBS desktop integration in /usr/share with the Mesa 25 launcher")
+message(STATUS "Installed OBS desktop integration with Mesa 25 and Panfrost GL 3.3")
