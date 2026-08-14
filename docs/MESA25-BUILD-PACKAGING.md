@@ -24,17 +24,16 @@ workflow。Mesa、Qt、MPP、FFmpeg 和 OBS 继续共用当前 `Dockerfile`；�
 最终产物：
 
 ```text
-out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
+out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb
 ```
 
 产物信息：
 
 ```text
 Package:      mesa25-local
-Version:      25.0.7-8~ans1
+Version:      25.0.7-14~ans1
 Architecture: arm64
-Size:         约 4.2 MB
-SHA-256:      6d7c524540f7ad5d5b661e4b4d248a48c3ca62e717bf0d2f0e11ce4d26a8baf4
+SHA-256:      113c31ec9e8e4dd01194fa7aa728d04e1dd17b5a6f424dce3ac96cd1d643f889
 ```
 
 ## 2. 为什么在现有 obs-buildenv 中编译
@@ -75,37 +74,18 @@ Mesa 开发和测试不需要执行它。
 | Debian 基础镜像 | `arm64v8/debian:11@sha256:9690447ddac1819c12c69aca67a003baa947887c504ba6308d19ab8067d148c7` |
 | Mesa tag | `mesa-25.0.7` |
 | Mesa commit | `742a20f48c59e8649533c84c4d49dd95b403f5da` |
+| Mesa tar.xz SHA-256 | `592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6` |
 | libdrm | `2.4.124` |
 | libdrm SHA-256 | `ac36293f61ca4aafaf4b16a2a7afff312aa4f5c37c9fbd797de9e3c0863ca379` |
 | Meson | `1.7.2` |
 | Meson wheel SHA-256 | `82c6818dc81743c96de3a458f06175776ebfde4081195ea31ea6971838f25e38` |
 | 安装前缀 | `/usr/local/ans` |
 
-Mesa 源码保留在 `obs-buildenv` 仓库之外，通过 BuildKit named context 传入
-Dockerfile。这避免把完整 Mesa 源码复制到构建环境仓库。
-
-本地源码树应满足：
-
-```sh
-cd /home/xuess/rockchip/daizong/obs/obs-buildenv
-
-test "$(cat ../mesa-25.0.7/VERSION)" = 25.0.7
-test "$(git -C ../mesa-25.0.7 rev-parse HEAD)" = \
-  742a20f48c59e8649533c84c4d49dd95b403f5da
-git -C ../mesa-25.0.7 describe --tags --exact-match
-```
-
-预期最后一条命令输出：
-
-```text
-mesa-25.0.7
-```
-
-如果尚未建立源码 worktree，可从现有 `../mesa` checkout 创建：
-
-```sh
-git -C ../mesa worktree add --detach ../mesa-25.0.7 mesa-25.0.7
-```
+Mesa 源码由 Dockerfile 在 `mesa25` stage 构建时从官方 archive 下载
+`mesa-25.0.7.tar.xz` 并以 SHA-256 固定（与 MPP / FFmpeg 的获取方式一致），
+解包后核对 `src/VERSION` 等于 `MESA_VERSION`。本地与 CI 均无需提前准备
+源码树；升级版本只需改 Dockerfile 顶部版本区的
+`MESA_VERSION` / `MESA_URL` / `MESA_SHA256` 三件套。
 
 ## 4. Debian 11 需要补充的构建依赖
 
@@ -245,7 +225,6 @@ export DOCKER_BUILDKIT=1
 
 docker build \
   --platform linux/arm64 \
-  --build-context mesa_source=../mesa-25.0.7 \
   --target mesa25 \
   -t obs-buildenv:mesa25-local \
   .
@@ -332,11 +311,16 @@ Mesa 的 GLVND vendor JSON 也被改为使用绝对路径：
 G52 EGL/GLES/GBM 库抢在 RK3588 Mesa 25 和 GLVND 之前；卸载 `mesa25-local` 时
 会自动恢复该文件。
 
-RK3588 上 Debian 11 Xorg 1.20 的 glamor 路径能够生成正常 cursor 图像，却没有
-把它合成到最终 scanout。`mesa25-xorg` 因此通过 `-config` 和独立
-`-configdir` 加载包内光标兼容配置，使用 `AccelMethod=none`、`SWcursor=true`、
-`PageFlip=false` 和 `ShadowFB=true`。这只关闭 Xorg 服务器的 glamor/2D 加速，
-EGL、GLES、GLX 和 GBM 客户端仍通过 Panfrost 使用 Mali-G610。设备原有
+原设备的 `xserver-xorg-core 2:1.20.11-1` 实际包含 Rockchip 定制
+`modesetting_drv.so`，会自动进入 `FlipFB: Transformed` 双缓冲/变换复制路径。
+该路径损坏普通窗口的复制和暴露恢复，同时造成光标与 panel 异常。换用 Debian 官方
+同 ABI 安全更新 `2:1.20.11-1+deb11u17` 后，窗口和标准 Xorg 光标立即恢复，而
+Panfrost glamor/DRI3 仍保持硬件加速。
+
+最终 `mesa25-xorg` 通过 `-config` 加载包内配置，使用 `AccelMethod=glamor`、
+`DRI=3`、`SWcursor=true`、`PageFlip=false` 和 `ShadowFB=false`。包依赖
+`xserver-common`/`xserver-xorg-core >= 2:1.20.11-1+deb11u17`，不再安装覆盖箭头；
+升级时还会清理旧版 `/etc/xdg/autostart/mesa25-pointer-arrow.desktop`。设备原有
 `/etc/X11/xorg.conf.d/20-modesetting.conf` 不会被修改或接管；卸载包后 LightDM
 恢复直接启动系统 Xorg，原 BSP 配置自然重新生效。
 
@@ -355,36 +339,31 @@ Debian 11 Xorg 1.20.11 的旧 glamor shader 没有声明
 
 ## 10. 从本地镜像导出 deb
 
-构建成功后执行：
+构建并直接导出轻量 `mesa-debs` target：
 
 ```sh
 cd /home/xuess/rockchip/daizong/obs/obs-buildenv
-mkdir -p out/mesa
-
-docker run --rm \
-  --platform linux/arm64 \
-  --user "$(id -u):$(id -g)" \
-  --entrypoint /bin/sh \
-  -v "$PWD/out/mesa:/export" \
-  obs-buildenv:mesa25-local \
-  -c 'cp -a /out/mesa/. /export/'
+docker build \
+  --platform=linux/arm64 \
+  --target mesa-debs \
+  --output type=local,dest=out/mesa-v14 .
 ```
 
-`--user` 用于避免 NFS 工作区将容器 root 映射成 `nobody`，导致导出的目录和 deb
-无法由当前用户更新。
+不要对 `mesa25` target 使用 `--output type=local`；那会导出整个构建容器根文件系统。
+`mesa-debs` 是仅含 `/out/mesa` 内容的 scratch 导出阶段。
 
 导出内容：
 
 ```text
-out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
-out/mesa/SHA256SUMS
+out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb
+out/mesa-v14/SHA256SUMS
 ```
 
 注意：`SHA256SUMS` 内记录的是同目录文件名，因此应进入该目录或使用子 shell
 校验：
 
 ```sh
-(cd out/mesa && sha256sum -c SHA256SUMS)
+(cd out/mesa-v14 && sha256sum -c SHA256SUMS)
 ```
 
 ## 11. 安装前的产物检查
@@ -392,13 +371,13 @@ out/mesa/SHA256SUMS
 检查 control 信息和 SHA-256：
 
 ```sh
-(cd out/mesa && sha256sum -c SHA256SUMS)
+(cd out/mesa-v14 && sha256sum -c SHA256SUMS)
 
 dpkg-deb -I \
-  out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
+  out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb
 
 dpkg-deb -f \
-  out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
+  out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb \
   Package Version Architecture Installed-Size
 ```
 
@@ -406,7 +385,7 @@ dpkg-deb -f \
 
 ```sh
 dpkg-deb -c \
-  out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
+  out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb \
   | grep -E '/usr/local/ans/(bin/mesa|lib/(libEGL_mesa|libgbm|libdrm|dri/(panthor|panfrost|rockchip)))'
 ```
 
@@ -519,13 +498,25 @@ Xorg maps 只包含 `/usr/local/ans` 的 `libdril_dri.so`、EGL、GBM、libdrm �
 Gallium，不再加载系统 Mesa 20 或厂商 Mali 图形库。`glxinfo -B` 和 X11
 `glmark2-es2` 均继续使用 Mali-G610 / Mesa 25.0.7。
 
-### 12.5 Xorg glamor 下鼠标光标不可见
+### 12.5 BSP Xorg FlipFB 导致窗口损坏和光标不可见
 
-切换到 Mesa 25 后，鼠标右键可以正常弹出菜单，但屏幕不显示指针。XFixes 读取到
-正常的 32×32 cursor 图像（336 个非透明像素，最大 alpha 255），证明输入设备、
-LXDE/Openbox 和光标主题均正常。`SWcursor=true` 单独启用后仍不可见；关闭 Xorg
-glamor 并启用 ShadowFB 后光标恢复。最终包因此使用上一节所述兼容配置，优先保证
-桌面可操作性；OBS 和其他 EGL/GLES 程序仍由 Mesa 25 Panfrost 硬件加速。
+切换到 Mesa 25 后，鼠标右键可以正常弹出菜单，但屏幕不显示指针；文件管理器还会
+出现黑块、彩色扫描线和错误内容。XWD 截图本身包含这些损坏，证明问题已经存在于
+X server root pixmap 中。现场测试得到以下关键结论：
+
+- `SWcursor=true` 单独启用后仍不可见；
+- 关闭 glamor、启用 ShadowFB 后光标恢复，但 X11/OBS renderer 变成 `softpipe`；
+- 硬件光标配合 page flip 时光标仍不可见，panel 还会出现彩色斑点；
+- `sync`、`nocrc`、`noafbc`、`linear` 和 `SWcursor=false` 均不能修复窗口；
+- BSP `modesetting_drv.so` 含非上游 `FlipFB` 扩展，日志始终进入
+  `FlipFB: Transformed`；
+- Debian 官方 Xorg `2:1.20.11-1+deb11u17` 去除该路径后，窗口、panel 和标准光标
+  同时恢复，Mali-G610/Panfrost 硬件加速保持不变。
+
+最终包保持 glamor/DRI3，关闭 page flip，依赖修复后的 Debian 官方 Xorg，并使用
+标准 Xorg 光标。文件管理器通过 30 次移动/缩放、5 次最小化恢复和 20 次整窗遮挡
+暴露压力测试；最终截图中窗口、桌面和 panel 均完整。完整证据见
+[CURSOR-NOT-VISIBLE-ANALYSIS.md](CURSOR-NOT-VISIBLE-ANALYSIS.md)。
 
 ### 12.6 编译器提示
 
@@ -541,14 +532,20 @@ Qt 6.2.4、MPP 1.3.9 和 FFmpeg 6.1.6 已有可用 deb，本轮只验证 Mesa �
 OBS 打包依赖已经增加：
 
 ```text
-mesa25-local (>= 25.0.7-8~ans1)
+mesa25-local (>= 25.0.7-14~ans1)
 ```
 
 OBS 的桌面入口也会通过以下命令启动，使 OBS 使用同一套 Mesa 25 环境：
 
 ```sh
-/usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs
+/usr/bin/env PAN_MESA_DEBUG=gl3 \
+  /usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs
 ```
+
+Panfrost 默认只公开桌面 OpenGL 3.1，而 OBS 32.2.1 要求 OpenGL 3.3。这里使用 Mesa
+官方 Panfrost 实验开关 `PAN_MESA_DEBUG=gl3` 公开 3.3；它不同于仅改版本字符串的
+`MESA_GL_VERSION_OVERRIDE`。设备日志已确认 OBS 选择
+`Mesa Mali-G610 (Panfrost)` 并完成 `Startup complete`。
 
 这次为了 Mesa 验证启动过一次完整 `obs-builder` 构建，但确认 Qt 等产物已有后已
 主动取消；Mesa deb 的成功编译、打包和设备测试不依赖那次未完成的全量构建。
@@ -572,7 +569,7 @@ OBS 的桌面入口也会通过以下命令启动，使 OBS 使用同一套 Mesa
 完整流程可以概括为：
 
 ```text
-校验 Mesa tag/commit
+下载 Mesa tar.xz 并校验 SHA-256
   → 构建 Debian 11 arm64 mesa-build-base
   → 构建并安装 libdrm 2.4.124 到 /usr/local/ans
   → 配置/编译/安装 Mesa 25.0.7 Panfrost

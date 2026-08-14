@@ -17,18 +17,18 @@ Mesa 25.0.7、EGL、OpenGL ES 和 panthor/Panfrost 硬件渲染是否正常。
 本地 deb：
 
 ```text
-out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
+out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb
 ```
 
 已验证的 SHA-256：
 
 ```text
-6d7c524540f7ad5d5b661e4b4d248a48c3ca62e717bf0d2f0e11ce4d26a8baf4
+113c31ec9e8e4dd01194fa7aa728d04e1dd17b5a6f424dce3ac96cd1d643f889
 ```
 
 主测试同时满足以下条件即为通过：
 
-1. 安装版本为 `25.0.7-8~ans1`，架构为 `arm64`，状态为 `ii`。
+1. 安装版本为 `25.0.7-14~ans1`，架构为 `arm64`，状态为 `ii`。
 2. EGL vendor 为 `Mesa Project`，EGL 版本为 `1.5`。
 3. GLES vendor 为 `Mesa`。
 4. renderer 为 `Mali-G610 (Panfrost)`，不能是 `llvmpipe` 或其他软件渲染器。
@@ -45,22 +45,22 @@ out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb
 ```sh
 cd /home/xuess/rockchip/daizong/obs/obs-buildenv
 
-(cd out/mesa && sha256sum -c SHA256SUMS)
+(cd out/mesa-v14 && sha256sum -c SHA256SUMS)
 
 dpkg-deb -f \
-  out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
+  out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb \
   Package Version Architecture Installed-Size
 
-scp out/mesa/mesa25-local_25.0.7-8~ans1_arm64.deb \
+scp out/mesa-v14/mesa25-local_25.0.7-14~ans1_arm64.deb \
   root@172.16.0.205:/tmp/
 ```
 
 校验应输出：
 
 ```text
-mesa25-local_25.0.7-8~ans1_arm64.deb: OK
+mesa25-local_25.0.7-14~ans1_arm64.deb: OK
 Package: mesa25-local
-Version: 25.0.7-8~ans1
+Version: 25.0.7-14~ans1
 Architecture: arm64
 ```
 
@@ -73,7 +73,7 @@ cd /tmp
 
 (cd /path/to/deb-directory && sha256sum -c SHA256SUMS)
 
-apt-get install ./mesa25-local_25.0.7-8~ans1_arm64.deb
+apt-get install ./mesa25-local_25.0.7-14~ans1_arm64.deb
 ldconfig
 
 dpkg-query -W \
@@ -84,14 +84,14 @@ dpkg-query -W \
 正确结果为：
 
 ```text
-mesa25-local 25.0.7-8~ans1 arm64 status=ii
+mesa25-local 25.0.7-14~ans1 arm64 status=ii
 ```
 
 安装前可先执行模拟，输出应只显示旧自定义包 `mesa25-rk3588-local` 被新包替换，
 不能删除 Debian Mesa、GLVND 或 BSP libmali：
 
 ```sh
-apt-get -s install ./mesa25-local_25.0.7-8~ans1_arm64.deb
+apt-get -s install ./mesa25-local_25.0.7-14~ans1_arm64.deb
 ```
 
 安装后确认这些系统包仍为 `ii`：
@@ -283,9 +283,9 @@ page-flip 已使用专用程序完成验证，步骤及结果见
 
 ## 9. 可选：X11 窗口 EGL/GLES 测试
 
-最终包为保证 RK3588 桌面鼠标光标可见，关闭了 Xorg 服务器自身的 glamor/2D
-加速，但 X11 客户端仍可通过 Mesa 25/Panfrost 创建硬件加速的 EGL/GLES/GLX
-context。在桌面会话中可执行：
+最终包保持 Xorg glamor/DRI3，使 X11 客户端通过 Mesa 25/Panfrost 创建硬件加速的
+EGL/GLES/GLX context；同时关闭 page flip，并要求使用不含 Rockchip `FlipFB`
+扩展的 Debian 官方 Xorg `2:1.20.11-1+deb11u17` 或更新版本。在桌面会话中可执行：
 
 ```sh
 runuser -u ans -- env \
@@ -299,10 +299,13 @@ runuser -u ans -- env \
 最终 Xorg 日志应包含：
 
 ```text
-Option "AccelMethod" "none"
+Option "AccelMethod" "glamor"
+Option "DRI" "3"
 Option "SWcursor" "true"
-glamor disabled
-ShadowFB: preferred NO, enabled YES
+Option "PageFlip" "false"
+Option "ShadowFB" "false"
+glamor X acceleration enabled on Mali-G610 (Panfrost)
+Initializing extension DRI3
 ```
 
 `glxinfo -B` 显示 direct rendering、Mesa 25.0.7 和 Mali-G610；
@@ -344,9 +347,9 @@ ldconfig -p | grep -E 'lib(EGL|gbm|drm)\.so'
 
 ### X11 测试显示 `DRI3: Could not get DRI3 device`
 
-最终配置有意关闭 Xorg glamor，因此应优先核对客户端的 EGL/GLX renderer 是否
-仍为 `Mali-G610 (Panfrost)`。这是 Xorg 显示路径问题，应与 surfaceless 主验收
-结果分开记录。
+最终配置要求 glamor/DRI3。出现这个错误表示包内 Xorg 配置可能没有生效，或 Xorg
+没有取得 GPU render node；检查 Xorg 启动命令、`/var/log/Xorg.0.log`、设备节点和
+权限。X11 renderer 为 `softpipe` 时不能记录为硬件验收通过。
 
 ### `glmark2-es2-drm` 不能创建 DRM window
 
@@ -365,7 +368,9 @@ ldconfig -p | grep -E 'lib(EGL|gbm|drm)\.so'
 架构：aarch64
 内核：6.1.115
 GPU 内核驱动：panthor
-包：mesa25-local 25.0.7-8~ans1 arm64
+包目标：mesa25-local 25.0.7-14~ans1 arm64
+Xorg：xserver-xorg-core 2:1.20.11-1+deb11u17 arm64
+OBS：obs-studio 32.2.1-4-g5df6a8bb0 arm64
 测试用户：ans（video、render 组）
 ```
 
@@ -379,9 +384,14 @@ Mali-G610 (Panfrost) 硬件渲染通过
 Mesa EGL/GBM/libdrm/Gallium 从 /usr/local/ans 加载
 Mesa 25 softpipe 软件回退通过
 系统 Mesa、GLVND 和 libmali 软件包保持安装
-Xorg 使用软件 2D/ShadowFB 兼容路径，鼠标光标正常显示
+Xorg glamor/DRI3 使用 Mali-G610，PageFlip=false、ShadowFB=false
+X11 GLX renderer=Mali-G610 (Panfrost)，Accelerated=yes
+OBS 在 PAN_MESA_DEBUG=gl3 下获得 OpenGL 3.3，Panfrost adapter 和启动完成通过
+OBS 已打开 /dev/dri/card0 与 /dev/dri/renderD130
+两个 H.264 媒体源均使用 h264_rkmpp，并持有两个 /dev/mpp_service 句柄
+禁用硬解后的 h264 软件回退通过，恢复后无 av:h264 软件帧线程
+标准 Xorg 光标可见且顺滑，文件管理器和 panel 无黑块/色斑，用户现场确认通过
 Xorg AIGLX/GLX rockchip 初始化通过，进程 maps 无系统 Mesa 20/厂商 Mali 混栈
-X11 GLX direct rendering 及 glmark2-es2 通过
 LightDM/Xorg 60 秒稳定性观察通过：PID 不变，NRestarts=0
 ```
 

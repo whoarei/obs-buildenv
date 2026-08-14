@@ -20,8 +20,10 @@
 - 四个包统一安装到 `/usr/local/ans`。`mesa25-local` 保留 Debian Mesa、GLVND 和
   BSP libmali 包以维持 APT 关系，但停用不兼容的 G52 libmali loader 路径，并让
   Mesa 25 成为系统、LightDM 和 Xorg 的默认图形栈。
-- RK3588 的 Debian 11 Xorg 1.20 glamor 路径无法显示软件光标；包默认让 Xorg
-  使用稳定的软件 2D/ShadowFB，EGL/GLES/GLX 应用仍使用 Panfrost 硬件加速。
+- 设备 BSP 的 Rockchip 定制 Xorg `modesetting` 驱动会自动进入损坏的 `FlipFB`
+  窗口复制路径。`mesa25-local` 要求 Debian 官方 Xorg 安全更新
+  `2:1.20.11-1+deb11u17` 或更新版本，保留 `glamor + DRI3` 和 Panfrost 硬件加速，
+  同时恢复正常的窗口、panel 和标准 Xorg 光标。
 - `ffmpeg6.1-ans-local` 依赖 `rockchip-mpp-local` 与 `librga2`（librga 为设备 BSP 包，目标机通常已自带）。
 - Release 附件含统一的 `SHA256SUMS`，下载后先校验：
   ```sh
@@ -37,7 +39,7 @@ docker pull --platform linux/arm64 ghcr.io/whoarei/obs-buildenv:latest
 ```
 
 Mesa 与 OBS 的最短安装、升级和回滚步骤见
-[MESA-OBS-INSTALL.md](MESA-OBS-INSTALL.md)。
+[MESA-OBS-INSTALL.md](docs/MESA-OBS-INSTALL.md)。
 
 ### 在 x86_64 主机上运行
 
@@ -69,47 +71,25 @@ docker run --rm \
 - OBS 程序、库、插件和运行数据保留在 `/usr/local/ans`；CPack 仅把 `.desktop`、图标和 metainfo 安装到标准 `/usr/share`，桌面入口使用绝对命令 `/usr/local/ans/bin/obs`。
 - `builddir` 命名卷保存 CMake 构建树，加速增量编译；配置异常时 `docker volume rm builddir` 后重跑即全量重配。
 - `ccache` 命名卷缓存编译产物，建议保留以加速反复编译（删除也不影响正确性）。
-- `build-obs.sh` 和 `cmake/` 下的 CPack 辅助脚本已内置到 `obs-builder` 镜像，正常构建无需额外挂载；文件更新后需要重新构建或发布镜像。
+- `build-obs.sh` 是镜像的入口文件（ENTRYPOINT），和 `cmake/` 下的 CPack 辅助脚本一起内置在 `obs-buildenv` 镜像中，正常构建无需额外挂载；文件更新后需要重新构建或发布镜像。本地修改了入口脚本但不想重建镜像时，可用卷直接覆盖镜像内副本立即生效：
+
+  ```sh
+  -v $PWD/build-obs.sh:/usr/local/bin/build-obs.sh:ro
+  ```
+
+  CPack 辅助脚本同理，挂载到 `/usr/local/share/obs-buildenv/` 下的同名路径即可。
 - 追加 cmake 参数：`-e EXTRA_CMAKE_FLAGS='-DXXX=ON'`（仅首次配置生效）。
-- 自定义产物包名：`-e DEBIAN_PACKAGE_NAME=obs-studio-<version>`（默认 `obs-studio-baseline`，编非基线版本时建议覆盖）。
+- 默认产物包名为 `obs-studio`；只有构建独立实验变体时才用
+  `-e DEBIAN_PACKAGE_NAME=obs-studio-<variant>` 覆盖。
 - 镜像内已设 `PKG_CONFIG_PATH=/usr/local/ans/lib/pkgconfig` 与 `PATH=/usr/local/ans/bin:...`，OBS 的 FindFFmpeg 优先选中自编译 FFmpeg 6.1.6 而非系统 4.3。
 
-产物 `obs-studio-baseline` deb 安装到目标机时，与依赖 deb 一同安装（`dpkg -i mesa25-local*.deb qt6.2-gles-local*.deb rockchip-mpp-local*.deb ffmpeg6.1-ans-local*.deb obs-studio-baseline*.deb`）。
-
-### Mesa 25.0.7 源码上下文
-
-Mesa 构建环境、依赖选择、Meson 配置、libdrm 2.4.124 编译、deb 打包及问题修正
-记录见 [MESA25-BUILD-PACKAGING.md](MESA25-BUILD-PACKAGING.md)。
-
-Mesa 使用仓库外的源码树，不复制源码快照进本仓库。本地默认读取 `../mesa-25.0.7`，并要求其中 `VERSION` 严格为 `25.0.7`：
+正式 RK3588 交付分支为 `rk3588/32.2.1-rkmpp`：它以 desktop OpenGL baseline
+为基础，仅加入媒体源 RKMPP 硬解码，不包含 GLES 后端。产物包名为 `obs-studio`，
+与依赖 deb 一同安装：
 
 ```sh
-git -C ../mesa worktree add --detach ../mesa-25.0.7 mesa-25.0.7
-./docker-build.sh
-```
-
-也可用 `MESA_SOURCE=/path/to/mesa-25.0.7 ./docker-build.sh` 覆盖。GitHub workflow 从 Mesa 官方 GitLab 浅克隆 `mesa-25.0.7` 标签，并核对 commit `742a20f48c59e8649533c84c4d49dd95b403f5da` 后作为 BuildKit named context 注入同一份 `Dockerfile`。
-
-安装 Mesa deb 后可执行真实 EGL/GLES 渲染读回测试：
-
-```sh
-/usr/local/ans/bin/mesa25-run /usr/local/ans/bin/mesa-egl-gles-smoke
-```
-
-完整的安装、测试、动态库加载链复核和结果文件采集步骤见
-[MESA25-EGL-GLES-TEST.md](MESA25-EGL-GLES-TEST.md)。
-
-libdrm 2.4.124 的 HDMI KMS 屏幕扫描输出和 60 秒 page-flip 测试见
-[LIBDRM-KMS-SCREEN-TEST.md](LIBDRM-KMS-SCREEN-TEST.md)。
-
-`mesa25-local` 安装时会通过 dpkg diversion 停用 BSP 的
-`00-aarch64-mali.conf`，同时为 LightDM 配置 Mesa 25 的 GLVND、DRI 和 GBM
-路径。普通程序可直接使用系统默认 Mesa 25；`mesa25-run` 仍保留作为诊断入口，
-用于显式固定 Mesa vendor、DRI、GBM 路径和 Debian GLVND dispatcher。OBS deb
-的桌面文件也继续使用该入口：
-
-```sh
-/usr/local/ans/bin/mesa25-run /usr/local/ans/bin/obs
+dpkg -i mesa25-local*.deb qt6.2-gles-local*.deb rockchip-mpp-local*.deb \
+  ffmpeg6.1-ans-local*.deb obs-studio-32.2.1-*-Linux.deb
 ```
 
 ### 构建 OBS 32.2.1 GLES 分支
@@ -136,18 +116,15 @@ docker run --rm \
 -v $PWD/cmake/cpack-desktop-integration.cmake:/usr/local/share/obs-buildenv/cpack-desktop-integration.cmake:ro
 ```
 
-构建后的设备安装、GLES/RKMPP 硬解、软件回退、循环播放和录制回归步骤见 [RK3588-GLES-RKMPP-TEST.md](RK3588-GLES-RKMPP-TEST.md)。
+构建后的设备安装、GLES/RKMPP 硬解、软件回退、循环播放和录制回归步骤见 [RK3588-GLES-RKMPP-TEST.md](docs/RK3588-GLES-RKMPP-TEST.md)。
 
-## 基线构建配置
-
-默认按上游基线：桌面 OpenGL 渲染后端（不定义 `OBS_USE_GLES`）、`ENABLE_WAYLAND=OFF`（镜像无 wayland 依赖）、`ENABLE_SCRIPTING=OFF`、`ENABLE_NEW_MPEGTS_OUTPUT=OFF`，按交付配置黑名单部分插件，CPack 包名 `obs-studio-baseline`，运行时安装前缀 `/usr/local/ans`（桌面集成文件位于 `/usr/share`），Depends 四个依赖 deb。最终 builder 显式选择 Mesa 25.0.7 的 GLVND vendor、DRI 和 GBM 路径，Qt 阶段保持 GLES-only 洁净。
 
 ## 项目结构
 
 | 文件/目录 | 作用 |
 | --- | --- |
-| `Dockerfile` | 多阶段：base → mesa25 / qt6 / mpp / ffmpeg6（依赖编译 + 打 deb，统一 prefix `/usr/local/ans`）→ obs-builder（开发镜像） |
-| `MESA-OBS-INSTALL.md` | Mesa 25、配套依赖和 OBS deb 的简要安装、升级与回滚手册 |
+| `Dockerfile` | 多阶段：base → mesa25 / qt6 / mpp / ffmpeg6（依赖编译 + 打 deb，统一 prefix `/usr/local/ans`）→ obs-buildenv（开发镜像） |
+| `docs/` | 安装手册、构建打包说明与各项设备测试报告（入口见上文各节链接） |
 | `mesa25-run` / `mesa-egl-gles-smoke.c` | 固定 Mesa 运行环境和验证 EGL 初始化、GLES 清屏、像素读回 |
 | `mesa-glamor-shader-smoke.c` | 复现 Debian 11 Xorg 1.20 glamor shader，验证 Mesa 25 的 Xorg 专用 GLSL 兼容规则 |
 | `libdrm-kms-screen-test.c` | 独占 DRM master，验证 HDMI KMS mode set、扫描输出和 page-flip |
