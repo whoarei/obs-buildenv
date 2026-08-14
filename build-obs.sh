@@ -97,6 +97,8 @@ else
 fi
 
 echo "== CPack 打包 =="
+# 清理构建目录里历史构建残留的 deb/ddeb，避免旧版本被一并拷到 /output
+find "$BUILD_DIR" -maxdepth 1 \( -name '*.deb' -o -name '*.ddeb' \) -delete
 ( cd "$BUILD_DIR" && cpack -G DEB )
 
 mkdir -p "$OUTPUT_DIR"
