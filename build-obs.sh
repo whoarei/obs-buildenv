@@ -1,12 +1,12 @@
-#!/bin/sh
+#!/bin/bash
 # obs-builder:debian11-arm64 容器入口：构建挂载进来的 OBS 源码并拷贝产物到 /output
 #
 # 约定（可用环境变量覆盖）：
 #   OBS_SRC_DIR   OBS 源码目录（bind mount 注入）   默认 /src/obs-studio
 #   BUILD_DIR     构建目录（建议挂 named volume）   默认 /build/obs-studio
 #   OUTPUT_DIR    产物输出目录（bind mount 到宿主机 obs-binary/） 默认 /output
-#   EXTRA_CMAKE_FLAGS  追加给首次 cmake 配置的额外 -D 参数
-#   DEBIAN_PACKAGE_NAME CPack 包名（默认 obs-studio-baseline；编其他版本时覆盖）
+#   EXTRA_CMAKE_FLAGS  追加给 cmake 配置（首次与增量重配置都会透传）的额外 -D 参数
+#   DEBIAN_PACKAGE_NAME CPack 包名（默认 obs-studio）
 #   DEBIAN_PACKAGE_CONFLICTS / DEBIAN_PACKAGE_REPLACES
 #       deb 冲突/替换关系；默认按包名避开“包与自身冲突”
 #   DESKTOP_INTEGRATION_SCRIPT
@@ -22,18 +22,13 @@ set -e
 OBS_SRC_DIR=${OBS_SRC_DIR:-/src/obs-studio}
 BUILD_DIR=${BUILD_DIR:-/build/obs-studio}
 OUTPUT_DIR=${OUTPUT_DIR:-/output}
-DEBIAN_PACKAGE_NAME=${DEBIAN_PACKAGE_NAME:-obs-studio-baseline}
+DEBIAN_PACKAGE_NAME=${DEBIAN_PACKAGE_NAME:-obs-studio}
 DESKTOP_INTEGRATION_SCRIPT=${DESKTOP_INTEGRATION_SCRIPT:-/usr/local/share/obs-buildenv/cpack-desktop-integration.cmake}
-case "$DEBIAN_PACKAGE_NAME" in
-  obs-studio-gles)
-    DEFAULT_DEBIAN_PACKAGE_CONFLICTS='obs-studio, libobs0, obs-studio-baseline'
-    DEFAULT_DEBIAN_PACKAGE_REPLACES='obs-studio, libobs0, obs-studio-baseline'
-    ;;
-  *)
-    DEFAULT_DEBIAN_PACKAGE_CONFLICTS='obs-studio, libobs0, obs-studio-gles'
-    DEFAULT_DEBIAN_PACKAGE_REPLACES='obs-studio, libobs0, obs-studio-gles'
-    ;;
-esac
+# 默认与 libobs0 冲突/替换；若包名本身就是 libobs0 则留空，避免包与自身冲突
+if [ "$DEBIAN_PACKAGE_NAME" != "libobs0" ]; then
+  DEFAULT_DEBIAN_PACKAGE_CONFLICTS='libobs0'
+  DEFAULT_DEBIAN_PACKAGE_REPLACES='libobs0'
+fi
 DEBIAN_PACKAGE_CONFLICTS=${DEBIAN_PACKAGE_CONFLICTS:-$DEFAULT_DEBIAN_PACKAGE_CONFLICTS}
 DEBIAN_PACKAGE_REPLACES=${DEBIAN_PACKAGE_REPLACES:-$DEFAULT_DEBIAN_PACKAGE_REPLACES}
 NPROC=$(nproc)
@@ -48,39 +43,48 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 # bind mount 源码属主与容器 root 不同，git describe（buildnumber/version）需要豁免
 git config --global --add safe.directory "$OBS_SRC_DIR" 2>/dev/null || true
 
+COMMON_CMAKE_ARGS=(
+  -DCPACK_DEBIAN_PACKAGE_NAME="$DEBIAN_PACKAGE_NAME"
+  -DCPACK_DEBIAN_PACKAGE_CONFLICTS="$DEBIAN_PACKAGE_CONFLICTS"
+  -DCPACK_DEBIAN_PACKAGE_REPLACES="$DEBIAN_PACKAGE_REPLACES"
+  -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS='/usr/local/ans/lib'
+  -DCPACK_PRE_BUILD_SCRIPTS="$DESKTOP_INTEGRATION_SCRIPT"
+)
+# 仅在显式设置时覆盖 deb 依赖，避免空串覆盖 OBS 自带 Depends
+if [ -n "${CPACK_DEBIAN_PACKAGE_DEPENDS:-}" ]; then
+  COMMON_CMAKE_ARGS+=(-DCPACK_DEBIAN_PACKAGE_DEPENDS="$CPACK_DEBIAN_PACKAGE_DEPENDS")
+fi
+
+INITIAL_CMAKE_ARGS=(
+  -G Ninja
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  -DCMAKE_INSTALL_PREFIX=/usr/local/ans
+  -DCMAKE_PREFIX_PATH=/usr/local/ans
+  -DCMAKE_C_COMPILER_LAUNCHER=ccache
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+  -DOBS_BUILD_NUMBER=1
+  -DENABLE_WAYLAND=OFF
+  -DENABLE_BROWSER=OFF
+  -DENABLE_WEBSOCKET=OFF
+  -DENABLE_SCRIPTING=OFF
+  -DENABLE_NEW_MPEGTS_OUTPUT=OFF
+  -DENABLE_RELOCATABLE=ON
+  '-DOBS_DISABLED_PLUGINS=aja;aja-output-ui;decklink;decklink-captions;decklink-output-ui;linux-jack;linux-pipewire;nv-filters;mac-virtualcam;obs-libfdk;obs-nvenc;obs-qsv11;obs-text;obs-vst;obs-webrtc;oss-audio;sndio;vlc-video'
+)
+
 if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
   FRESH=1
   echo "== 首次配置：$OBS_SRC_DIR -> $BUILD_DIR =="
-  # 基线（上游默认）：桌面 OpenGL 渲染后端，不定义 OBS_USE_GLES；
-  # OBS_DISABLED_PLUGINS / CPack 元数据按交付配置执行。
-  cmake -S "$OBS_SRC_DIR" -B "$BUILD_DIR" -G Ninja \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_INSTALL_PREFIX=/usr/local/ans \
-    -DCMAKE_PREFIX_PATH="/usr/local/ans" \
-    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-    -DOBS_BUILD_NUMBER=1 \
-    -DENABLE_WAYLAND=OFF \
-    -DENABLE_BROWSER=OFF -DENABLE_WEBSOCKET=OFF -DENABLE_SCRIPTING=OFF \
-    -DENABLE_NEW_MPEGTS_OUTPUT=OFF \
-    -DENABLE_RELOCATABLE=ON \
-    -DOBS_DISABLED_PLUGINS='aja;aja-output-ui;decklink;decklink-captions;decklink-output-ui;linux-jack;linux-pipewire;nv-filters;mac-virtualcam;obs-libfdk;obs-nvenc;obs-qsv11;obs-text;obs-vst;obs-webrtc;oss-audio;sndio;vlc-video' \
-    -DCPACK_DEBIAN_PACKAGE_NAME=${DEBIAN_PACKAGE_NAME} \
-    -DCPACK_DEBIAN_PACKAGE_DEPENDS='mesa25-local (>= 25.0.7-8~ans1), qt6.2-gles-local (>= 6.2.4-1~ans1), ffmpeg6.1-ans-local (>= 6.1.6-1~ans1), rockchip-mpp-local (>= 1.3.9-1~ans1)' \
-    -DCPACK_DEBIAN_PACKAGE_CONFLICTS="$DEBIAN_PACKAGE_CONFLICTS" \
-    -DCPACK_DEBIAN_PACKAGE_REPLACES="$DEBIAN_PACKAGE_REPLACES" \
-    -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS='/usr/local/ans/lib' \
-    -DCPACK_PRE_BUILD_SCRIPTS="$DESKTOP_INTEGRATION_SCRIPT" \
+
+  cmake -S "$OBS_SRC_DIR" -B "$BUILD_DIR" \
+    "${INITIAL_CMAKE_ARGS[@]}" \
+    "${COMMON_CMAKE_ARGS[@]}" \
     ${EXTRA_CMAKE_FLAGS:-}
 else
   echo "== 增量重配置（沿用缓存参数） =="
+
   cmake -S "$OBS_SRC_DIR" -B "$BUILD_DIR" \
-    -DCPACK_DEBIAN_PACKAGE_NAME="$DEBIAN_PACKAGE_NAME" \
-    -DCPACK_DEBIAN_PACKAGE_DEPENDS='mesa25-local (>= 25.0.7-8~ans1), qt6.2-gles-local (>= 6.2.4-1~ans1), ffmpeg6.1-ans-local (>= 6.1.6-1~ans1), rockchip-mpp-local (>= 1.3.9-1~ans1)' \
-    -DCPACK_DEBIAN_PACKAGE_CONFLICTS="$DEBIAN_PACKAGE_CONFLICTS" \
-    -DCPACK_DEBIAN_PACKAGE_REPLACES="$DEBIAN_PACKAGE_REPLACES" \
-    -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS='/usr/local/ans/lib' \
-    -DCPACK_PRE_BUILD_SCRIPTS="$DESKTOP_INTEGRATION_SCRIPT" \
+    "${COMMON_CMAKE_ARGS[@]}" \
     ${EXTRA_CMAKE_FLAGS:-}
 fi
 
@@ -97,7 +101,8 @@ echo "== CPack 打包 =="
 
 mkdir -p "$OUTPUT_DIR"
 find "$BUILD_DIR" -maxdepth 1 \( -name '*.deb' -o -name '*.ddeb' \) -exec cp -v {} "$OUTPUT_DIR/" \;
-( cd "$OUTPUT_DIR" && sha256sum *.deb > SHA256SUMS 2>/dev/null || true )
+ls "$OUTPUT_DIR"/*.deb >/dev/null 2>&1 || die "CPack 未产出 deb，$OUTPUT_DIR 中没有可打包的产物"
+( cd "$OUTPUT_DIR" && sha256sum *.deb > SHA256SUMS )
 
 if [ -n "${OUTPUT_UID:-}" ]; then
   chown -R "${OUTPUT_UID}:${OUTPUT_GID:-$OUTPUT_UID}" "$OUTPUT_DIR" || true
