@@ -1,6 +1,6 @@
 # Mesa 25 与 OBS 简要安装手册
 
-本文用于在 RK3588、Debian 11 arm64 系统上安装 `obs-buildenv v0.2.0`
+本文用于在 RK3588、Debian 11 arm64 系统上安装 `obs-buildenv v0.3.0`
 产出的 Mesa 25.0.7 和 OBS。详细的 Mesa 构建说明及 EGL/GLES 测试方法分别见
 [MESA25-BUILD-PACKAGING.md](MESA25-BUILD-PACKAGING.md) 和
 [MESA25-EGL-GLES-TEST.md](MESA25-EGL-GLES-TEST.md)。
@@ -24,7 +24,7 @@ Mesa、Qt、MPP、FFmpeg 和 OBS 均安装到 `/usr/local/ans`。不要手工删
 Mesa、GLVND 或 BSP libmali 包；`mesa25-local` 会保留这些包以满足 APT 依赖，
 并在安装脚本中安全调整实际加载优先级。
 
-将需要的 deb 放到设备上的同一目录，例如 `/tmp/obs-v0.2.0`，然后进入该目录。
+将需要的 deb 放到设备上的同一目录，例如 `/tmp/obs-v0.3.0`，然后进入该目录。
 如果随发布包提供了校验文件，先执行：
 
 ```sh
